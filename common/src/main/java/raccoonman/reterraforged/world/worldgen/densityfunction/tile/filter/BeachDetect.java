@@ -6,49 +6,131 @@ import raccoonman.reterraforged.world.worldgen.cell.Cell;
 import raccoonman.reterraforged.world.worldgen.cell.heightmap.Levels;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.TerrainType;
 import raccoonman.reterraforged.world.worldgen.densityfunction.tile.Size;
+import raccoonman.reterraforged.world.worldgen.noise.NoiseUtil;
 
 public record BeachDetect(Levels levels, ControlPoints transition) implements Filter {
-    
+
+    // maximum values, used when slider is fully toward COAST
+    private static final int MAX_SEARCH_RADIUS = 12;
+    private static final int MAX_SHALLOW_DEPTH = 6;
+    private static final int MAX_DILATE_RADIUS = 8;
+    private static final int STEP = 4;
+
+    private static final float SAFE_EROSION = 0.5F;
+    private static final float SAFE_WEIRDNESS = 0.0F;
+
+    // 0 = slider at shallowOcean (no beach width), 1 = slider at coast (max width)
+    private float widthRatio() {
+        float shallowOcean = this.transition.shallowOcean;
+        float coast = this.transition.coast;
+        float beach = this.transition.beach;
+        if (coast == shallowOcean) {
+            return 0.0F;
+        }
+        float ratio = (beach - shallowOcean) / (coast - shallowOcean);
+        return NoiseUtil.clamp(ratio, 0.0F, 1.0F);
+    }
+
     @Override
     public void apply(Filterable map, int seedX, int seedZ, int iterations) {
         Size size = map.getBlockSize();
         int total = size.total();
-        
-        for(int x = 0; x < total; x++) {
-        	for(int z = 0; z < total; z++) {
-        		Cell cell = map.getCellRaw(x, z);
-	        	if (cell.terrain.isCoast() && !cell.terrain.isWetland() && cell.continentEdge < this.transition.beach) {
-	                Cell n = map.getCellRaw(x, z - 8);
-	                Cell s = map.getCellRaw(x, z + 8);
-	                Cell e = map.getCellRaw(x + 8, z);
-	                Cell w = map.getCellRaw(x - 8, z);
-	                float gx = this.grad(e, w, cell);
-	                float gz = this.grad(n, s, cell);
-	                float d2 = gx * gx + gz * gz;
-	                if (d2 < 0.275F) {
-                		map.getCellRaw(x, z).terrain = TerrainType.BEACH;
-	                }
-	            }
-	        }
+
+        float ratio = this.widthRatio();
+        int searchRadius = Math.round(MAX_SEARCH_RADIUS * ratio);
+        int shallowDepth = Math.round(MAX_SHALLOW_DEPTH * ratio);
+        int dilateRadius = Math.round(MAX_DILATE_RADIUS * ratio);
+
+        if (ratio <= 0.0F) {
+            return; // slider at shallowOcean: no beach generation at all
+        }
+
+        // pass 1: primary classification
+        for (int x = 0; x < total; x++) {
+            for (int z = 0; z < total; z++) {
+                Cell cell = map.getCellRaw(x, z);
+
+                if (cell.terrain.overridesCoast() || cell.terrain.isWetland()) {
+                    continue;
+                }
+
+                boolean underwater = cell.height <= this.levels.water;
+
+                if (underwater) {
+                    int depthBlocks = this.levels.scale(this.levels.water) - this.levels.scale(cell.height);
+                    if (depthBlocks <= shallowDepth) {
+                        Cell target = map.getCellRaw(x, z);
+                        target.terrain = TerrainType.SHOAL;
+                        this.forceSafeParameters(target);
+                    }
+                } else {
+                    if (cell.terrain.isOverground() && this.isNearWater(map, x, z, searchRadius)) {
+                        Cell target = map.getCellRaw(x, z);
+                        target.terrain = TerrainType.BEACH;
+                        this.forceSafeParameters(target);
+                    }
+                }
+            }
+        }
+
+        // pass 2: dilation to catch stray quart-cell sampling gaps
+        for (int x = 0; x < total; x++) {
+            for (int z = 0; z < total; z++) {
+                Cell cell = map.getCellRaw(x, z);
+
+                if (cell.terrain == TerrainType.BEACH || cell.terrain == TerrainType.SHOAL) {
+                    continue;
+                }
+                if (cell.terrain.overridesCoast() || cell.terrain.isWetland()) {
+                    continue;
+                }
+
+                if (this.isNearBeachOrShoal(map, x, z, dilateRadius)) {
+                    boolean underwater = cell.height <= this.levels.water;
+                    Cell target = map.getCellRaw(x, z);
+                    target.terrain = underwater ? TerrainType.SHOAL : TerrainType.BEACH;
+                    this.forceSafeParameters(target);
+                }
+            }
         }
     }
-    
-    private float grad(Cell a, Cell b, Cell def) {
-        int distance = 17;
-        if (a.isAbsent()) {
-            a = def;
-            distance -= 8;
+
+    private boolean isNearBeachOrShoal(Filterable map, int x, int z, int radius) {
+        for (int dz = -radius; dz <= radius; dz++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                if (dx == 0 && dz == 0) continue;
+                Cell neighbor = map.getCellRaw(x + dx, z + dz);
+                if (neighbor.isAbsent()) continue;
+                if (neighbor.terrain == TerrainType.BEACH || neighbor.terrain == TerrainType.SHOAL) {
+                    return true;
+                }
+            }
         }
-        if (b.isAbsent()) {
-            b = def;
-            distance -= 8;
-        }
-        return (a.height - b.height) / distance;
+        return false;
     }
-    
+
+    private void forceSafeParameters(Cell cell) {
+        cell.erosion = SAFE_EROSION;
+        cell.weirdness = SAFE_WEIRDNESS;
+    }
+
+    private boolean isNearWater(Filterable map, int x, int z, int radius) {
+        for (int dz = -radius; dz <= radius; dz += STEP) {
+            for (int dx = -radius; dx <= radius; dx += STEP) {
+                if (dx == 0 && dz == 0) continue;
+                Cell neighbor = map.getCellRaw(x + dx, z + dz);
+                if (neighbor.isAbsent()) continue;
+                if (neighbor.height <= this.levels.water) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public static BeachDetect make(GeneratorContext ctx) {
-    	Levels levels = ctx.levels;
-    	ControlPoints transition = ctx.preset.world().controlPoints;
-    	return new BeachDetect(levels, transition);
+        Levels levels = ctx.levels;
+        ControlPoints transition = ctx.preset.world().controlPoints;
+        return new BeachDetect(levels, transition);
     }
 }

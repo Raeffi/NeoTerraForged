@@ -65,7 +65,24 @@ public enum TerrainCategory implements ITerrain {
         public boolean overridesRiver() {
             return true;
         }
-    }, 
+    },
+    SHOAL {
+        @Override
+        public boolean isSubmerged() {
+            return true; // depth/fluid logic still treats this as underwater
+        }
+
+        @Override
+        public boolean overridesRiver() {
+            return true;
+        }
+
+        // deliberately NOT isShallowOcean() — we want SHOAL routed to the
+        // COAST continentalness branch in CellSampler, not the ocean branch.
+        // deliberately NOT isCoast() either — isCoast() is used elsewhere
+        // (BeachDetect's own gating, ClimateModule) to mean "land coast";
+        // SHOAL is checked explicitly by type instead, see CellSampler below.
+    },
     RIVER {
         @Override
         public boolean isRiver() {

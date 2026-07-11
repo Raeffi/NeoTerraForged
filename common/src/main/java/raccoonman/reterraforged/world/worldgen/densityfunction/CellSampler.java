@@ -133,25 +133,25 @@ public record CellSampler(Supplier<WorldLookup> deferredLookup, Field field) imp
 				if(cell.terrain == TerrainType.MUSHROOM_FIELDS) {
 					return Continentalness.MUSHROOM_FIELDS.mid();
 				}
-				
+
 				if(cell.terrain.isDeepOcean()) {
 					float alpha = NoiseUtil.clamp(cell.continentEdge, 0.0F, deepOcean);
 					alpha = NoiseUtil.lerp(alpha, 0.0F, deepOcean, 0.0F, 1.0F);
-					return NoiseUtil.lerp(Continentalness.DEEP_OCEAN.min() + 0.05F, Continentalness.DEEP_OCEAN.max(), alpha);					
+					return NoiseUtil.lerp(Continentalness.DEEP_OCEAN.min() + 0.05F, Continentalness.DEEP_OCEAN.max(), alpha);
 				}
-				
+
 				if(cell.terrain.isShallowOcean()) {
 					float alpha = NoiseUtil.clamp(cell.continentEdge, deepOcean, shallowOcean);
 					alpha = NoiseUtil.lerp(alpha, deepOcean, shallowOcean, 0.0F, 0.98F);
 					return NoiseUtil.lerp(Continentalness.OCEAN.min(), Continentalness.OCEAN.max(), alpha);
 				}
-				
-				if(cell.terrain.getDelegate() == TerrainCategory.BEACH && cell.height + cell.beachNoise < levels.water(5)) {
+
+				if (cell.terrain.isCoast() || cell.terrain == TerrainType.SHOAL) {
 					float alpha = NoiseUtil.clamp(cell.continentEdge, shallowOcean, beach);
 					alpha = NoiseUtil.lerp(alpha, shallowOcean, beach, 0.0F, 1.0F);
 					return NoiseUtil.lerp(Continentalness.COAST.min(), Continentalness.COAST.max(), alpha);
 				}
-			
+
 				float alpha = NoiseUtil.clamp(cell.continentEdge, beach, inland);
 				alpha = NoiseUtil.lerp(alpha, beach, inland, 0.0F, 1.0F);
 				return NoiseUtil.lerp(Continentalness.NEAR_INLAND.mid(), Continentalness.FAR_INLAND.max(), alpha);
