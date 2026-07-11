@@ -1,7 +1,9 @@
 package raccoonman.reterraforged.world.worldgen.densityfunction.tile.filter;
 
+import net.minecraft.world.level.biome.Climate;
 import raccoonman.reterraforged.data.worldgen.preset.settings.WorldSettings.ControlPoints;
 import raccoonman.reterraforged.world.worldgen.GeneratorContext;
+import raccoonman.reterraforged.world.worldgen.biome.BeachParameterCache;
 import raccoonman.reterraforged.world.worldgen.cell.Cell;
 import raccoonman.reterraforged.world.worldgen.cell.heightmap.Levels;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.TerrainType;
@@ -11,13 +13,16 @@ import raccoonman.reterraforged.world.worldgen.noise.NoiseUtil;
 public record BeachDetect(Levels levels, ControlPoints transition) implements Filter {
 
     // maximum values, used when slider is fully toward COAST
-    private static final int MAX_SEARCH_RADIUS = 12;
+    private static final int MAX_SEARCH_RADIUS = 4;
     private static final int MAX_SHALLOW_DEPTH = 6;
-    private static final int MAX_DILATE_RADIUS = 8;
+    private static final int MAX_DILATE_RADIUS = 2;
     private static final int STEP = 4;
 
     private static final float SAFE_EROSION = 0.5F;
     private static final float SAFE_WEIRDNESS = 0.0F;
+
+    private static final float STEEPNESS_THRESHOLD = 0.06F; // tune based on testing, same scale as your original d2 check
+
 
     // 0 = slider at shallowOcean (no beach width), 1 = slider at coast (max width)
     private float widthRatio() {
@@ -60,14 +65,16 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
                     int depthBlocks = this.levels.scale(this.levels.water) - this.levels.scale(cell.height);
                     if (depthBlocks <= shallowDepth) {
                         Cell target = map.getCellRaw(x, z);
-                        target.terrain = TerrainType.SHOAL;
-                        this.forceSafeParameters(target);
+                        boolean steep = this.computeSteepness(map, x, z) >= STEEPNESS_THRESHOLD;
+                        target.terrain = TerrainType.SHOAL; // or BEACH
+                        this.forceSafeParameters(target, steep);
                     }
                 } else {
                     if (cell.terrain.isOverground() && this.isNearWater(map, x, z, searchRadius)) {
                         Cell target = map.getCellRaw(x, z);
-                        target.terrain = TerrainType.BEACH;
-                        this.forceSafeParameters(target);
+                        boolean steep = this.computeSteepness(map, x, z) >= STEEPNESS_THRESHOLD;
+                        target.terrain = TerrainType.BEACH; // or SHOAL
+                        this.forceSafeParameters(target, steep);
                     }
                 }
             }
@@ -89,7 +96,8 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
                     boolean underwater = cell.height <= this.levels.water;
                     Cell target = map.getCellRaw(x, z);
                     target.terrain = underwater ? TerrainType.SHOAL : TerrainType.BEACH;
-                    this.forceSafeParameters(target);
+                    boolean steep = this.computeSteepness(map, x, z) >= STEEPNESS_THRESHOLD;
+                    this.forceSafeParameters(target, steep);
                 }
             }
         }
@@ -109,9 +117,48 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
         return false;
     }
 
-    private void forceSafeParameters(Cell cell) {
-        cell.erosion = SAFE_EROSION;
-        cell.weirdness = SAFE_WEIRDNESS;
+    // vanilla's registered stony_shore parameter point (approximate, from overworld.json)
+    private static final Climate.ParameterPoint STONY_SHORE_POINT = new Climate.ParameterPoint(
+            Climate.Parameter.span(-0.19F, -0.11F),  // continentalness (COAST band)
+            Climate.Parameter.span(0.55F, 1.0F),     // erosion (high erosion, matches vanilla's rocky/steep coast placement)
+            Climate.Parameter.span(-1.0F, 1.0F),     // temperature (any)
+            Climate.Parameter.span(-1.0F, 1.0F),     // humidity (any)
+            Climate.Parameter.span(-1.0F, 1.0F),     // weirdness (any)
+            Climate.Parameter.span(-1.0F, 1.0F),
+            0L
+    );
+
+    private float computeSteepness(Filterable map, int x, int z) {
+        Cell n = map.getCellRaw(x, z - 8);
+        Cell s = map.getCellRaw(x, z + 8);
+        Cell e = map.getCellRaw(x + 8, z);
+        Cell w = map.getCellRaw(x - 8, z);
+        float gx = this.grad(e, w, map.getCellRaw(x, z));
+        float gz = this.grad(n, s, map.getCellRaw(x, z));
+        return gx * gx + gz * gz;
+    }
+
+    private float grad(Cell a, Cell b, Cell def) {
+        int distance = 17;
+        if (a.isAbsent()) { a = def; distance -= 8; }
+        if (b.isAbsent()) { b = def; distance -= 8; }
+        return (a.height - b.height) / distance;
+    }
+
+    private void forceSafeParameters(Cell cell, boolean steep) {
+        float[] safe = BeachParameterCache.findClosestErosionWeirdness(cell.temperature, cell.moisture);
+        if (safe != null) {
+            cell.erosion = safe[0];
+            cell.weirdness = safe[1];
+        } else {
+            cell.erosion = SAFE_EROSION;
+            cell.weirdness = SAFE_WEIRDNESS;
+        }
+        if (steep) {
+            cell.erosion = (STONY_SHORE_POINT.erosion().min() + STONY_SHORE_POINT.erosion().max()) / 2.0F;
+            cell.weirdness = SAFE_WEIRDNESS; // keep your existing safe weirdness, avoid VALLEY
+            return;
+        }
     }
 
     private boolean isNearWater(Filterable map, int x, int z, int radius) {
@@ -133,4 +180,5 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
         ControlPoints transition = ctx.preset.world().controlPoints;
         return new BeachDetect(levels, transition);
     }
+
 }
