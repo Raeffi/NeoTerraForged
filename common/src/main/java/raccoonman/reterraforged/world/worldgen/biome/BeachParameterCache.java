@@ -8,20 +8,20 @@ public class BeachParameterCache {
     private static List<Climate.ParameterPoint> beachPoints = List.of();
     private static List<Climate.ParameterPoint> stonyShorePoints = List.of();
 
+    private static final float QUANTIZATION = 10000.0F;
+
     public static void set(List<Climate.ParameterPoint> beach, List<Climate.ParameterPoint> stonyShore) {
         beachPoints = List.copyOf(beach);
         stonyShorePoints = List.copyOf(stonyShore);
     }
 
-    public static List<Climate.ParameterPoint> get() {
-        return beachPoints;
-    }
+    public static float[] findClosestErosionWeirdness(float temperature, float humidity, float continentalness, float erosion, boolean steep) {
+        // steep terrain always gets stony_shore, no search needed
+        if (steep && !stonyShorePoints.isEmpty()) {
+            Climate.ParameterPoint point = stonyShorePoints.get(0);
+            return toErosionWeirdness(point);
+        }
 
-    private static final float QUANTIZATION = 10000.0F;
-
-    // finds the closest cached beach parameter point to the given
-    // temperature/humidity, returns its erosion/weirdness midpoints
-    public static float[] findClosestErosionWeirdness(float temperature, float humidity) {
         if (beachPoints.isEmpty()) {
             return null;
         }
@@ -31,10 +31,10 @@ public class BeachParameterCache {
             long dist = point.fitness(Climate.target(
                     temperature,
                     humidity,
-                    point.continentalness().min(),
-                    point.erosion().min(),
+                    continentalness,
+                    erosion,
                     0,
-                    point.weirdness().min()
+                    0
             ));
             if (dist < bestDist) {
                 bestDist = dist;
@@ -44,10 +44,12 @@ public class BeachParameterCache {
         if (best == null) {
             return null;
         }
+        return toErosionWeirdness(best);
+    }
 
-        float erosion = ((best.erosion().min() + best.erosion().max()) / 2.0F) / QUANTIZATION;
-        float weirdness = ((best.weirdness().min() + best.weirdness().max()) / 2.0F) / QUANTIZATION;
-
-        return new float[] { erosion, weirdness };
+    private static float[] toErosionWeirdness(Climate.ParameterPoint point) {
+        float e = ((point.erosion().min() + point.erosion().max()) / 2.0F) / QUANTIZATION;
+        float w = ((point.weirdness().min() + point.weirdness().max()) / 2.0F) / QUANTIZATION;
+        return new float[] { e, w };
     }
 }

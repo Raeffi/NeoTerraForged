@@ -44,7 +44,9 @@ public class Cell {
     public float weirdness;
     public float temperature;
     public float moisture;
-    
+
+    public boolean beachParametersSet;
+
     @Deprecated(forRemoval = true)
     public float beachNoise;
 
@@ -88,6 +90,7 @@ public class Cell {
 
     public Cell reset() {
         this.copyFrom(Cell.DEFAULTS);
+        this.beachParametersSet = false;
         return this;
     }
 

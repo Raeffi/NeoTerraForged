@@ -22,31 +22,23 @@ public record NoiseCorrection(Levels levels) implements Filter {
 				int endX = QuartPos.toBlock(quartX + 1);
 				int endZ = QuartPos.toBlock(quartZ + 1);
 
-				boolean touchesShore = false;
+				boolean isBeach = false;
 
 				beachTest:
 				for(int x = startX; x < endX; x++) {
 					for(int z = startZ; z < endZ; z++) {
 						Cell cell = map.getCellRaw(x, z);
-						if (cell.terrain == TerrainType.BEACH || cell.terrain == TerrainType.SHOAL) {
-							touchesShore = true;
+						if(cell.terrain.getDelegate() == TerrainCategory.BEACH || ((cell.terrain.isShallowOcean() || cell.terrain.isDeepOcean()) && cell.height > this.levels.water)) {
+							isBeach = true;
 							break beachTest;
 						}
 					}
 				}
 
-				if (touchesShore) {
+				if(isBeach) {
 					for(int x = startX; x < endX; x++) {
 						for(int z = startZ; z < endZ; z++) {
-							Cell cell = map.getCellRaw(x, z);
-							if (cell.terrain.overridesCoast() || cell.terrain.isWetland()) {
-								continue;
-							}
-							if (cell.height <= this.levels.water) {
-								cell.terrain = TerrainType.SHOAL;
-							} else {
-								cell.terrain = TerrainType.BEACH;
-							}
+							map.getCellRaw(x, z).terrain = TerrainType.BEACH;
 						}
 					}
 				}
