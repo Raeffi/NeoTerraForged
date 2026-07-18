@@ -7,22 +7,39 @@ import raccoonman.reterraforged.world.worldgen.cell.Cell;
 import raccoonman.reterraforged.world.worldgen.cell.heightmap.Levels;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.TerrainType;
 import raccoonman.reterraforged.world.worldgen.densityfunction.tile.Size;
+import raccoonman.reterraforged.world.worldgen.util.PosUtil;
 
 public record BeachDetect(Levels levels, ControlPoints transition) implements Filter {
 
     public static final float SAFE_EROSION = 0.5F;
     public static final float SAFE_WEIRDNESS = 0.15F;
-    private static final float STEEPNESS_THRESHOLD = 6e-7F;
+    private static final float STEEPNESS_THRESHOLD = 20e-7F;
 
     private boolean isSteep(Filterable map, Cell cell, int x, int z) {
+        float sum = 0;
+        int count = 0;
+        for (int dz = -4; dz <= 4; dz += 4) {
+            for (int dx = -4; dx <= 4; dx += 4) {
+                Cell sample = map.getCellRaw(x + dx, z + dz);
+                if (sample.isAbsent()) continue;
+                float d2 = this.computeD2(map, sample, x + dx, z + dz);
+                sum += d2;
+                count++;
+            }
+        }
+        if (count == 0) return false;
+        float avg = sum / count;
+        return avg >= STEEPNESS_THRESHOLD;
+    }
+
+    private float computeD2(Filterable map, Cell cell, int x, int z) {
         Cell n = map.getCellRaw(x, z - 8);
         Cell s = map.getCellRaw(x, z + 8);
         Cell e = map.getCellRaw(x + 8, z);
         Cell w = map.getCellRaw(x - 8, z);
         float gx = this.grad(e, w, cell);
         float gz = this.grad(n, s, cell);
-        float d2 = gx * gx + gz * gz;
-        return d2 >= STEEPNESS_THRESHOLD;
+        return gx * gx + gz * gz;
     }
 
     private float grad(Cell a, Cell b, Cell def) {
@@ -76,8 +93,9 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
 
                 boolean steep = this.isSteep(map, cell, x, z);
 
+                long cellSeed = PosUtil.pack(x, z); // or however you derive a stable per-position long elsewhere in this codebase
                 float[] safe = BeachParameterCache.findClosestErosionWeirdness(
-                        cell.temperature, cell.moisture, cell.continentEdge, cell.erosion, steep
+                        cell.temperature, cell.moisture, cell.continentEdge, cell.erosion, steep, cellSeed
                 );
 
                 if (safe != null) {
