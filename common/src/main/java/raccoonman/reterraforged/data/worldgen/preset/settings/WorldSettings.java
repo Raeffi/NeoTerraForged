@@ -10,21 +10,28 @@ public class WorldSettings {
 	public static final Codec<WorldSettings> CODEC = RecordCodecBuilder.create(instance -> instance.group(
 		Continent.CODEC.fieldOf("continent").forGetter((o) -> o.continent),
 		ControlPoints.CODEC.fieldOf("controlPoints").forGetter((o) -> o.controlPoints),
-		Properties.CODEC.fieldOf("properties").forGetter((o) -> o.properties)
+		Properties.CODEC.fieldOf("properties").forGetter((o) -> o.properties),
+		Islands.CODEC.optionalFieldOf("islands", Islands.makeDefault()).forGetter((o) -> o.islands)
 	).apply(instance, WorldSettings::new));
 	
     public Continent continent;
     public ControlPoints controlPoints;
     public Properties properties;
+    public Islands islands;
     
     public WorldSettings(Continent continent, ControlPoints controlPoints, Properties properties) {
+        this(continent, controlPoints, properties, Islands.makeDefault());
+    }
+    
+    public WorldSettings(Continent continent, ControlPoints controlPoints, Properties properties, Islands islands) {
         this.continent = continent;
         this.controlPoints = controlPoints;
         this.properties = properties;
+        this.islands = islands;
     }
     
     public WorldSettings copy() {
-    	return new WorldSettings(this.continent.copy(), this.controlPoints.copy(), this.properties.copy());
+    	return new WorldSettings(this.continent.copy(), this.controlPoints.copy(), this.properties.copy(), this.islands.copy());
     }
     
     public static class Continent {
@@ -136,5 +143,50 @@ public class WorldSettings {
         public int terrainScaler() {
         	return Math.min(this.worldHeight, 256);
         }
+    }
+    
+    public static class Islands {
+    	public static final Codec<Islands> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+    		Codec.BOOL.optionalFieldOf("enabled", true).forGetter((o) -> o.enabled),
+    		Codec.INT.optionalFieldOf("spacing", 600).forGetter((o) -> o.spacing),
+    		Codec.FLOAT.optionalFieldOf("chance", 0.2F).forGetter((o) -> o.chance),
+    		Codec.FLOAT.optionalFieldOf("minRadius", 32.0F).forGetter((o) -> o.minRadius),
+    		Codec.FLOAT.optionalFieldOf("maxRadius", 128.0F).forGetter((o) -> o.maxRadius),
+    		Codec.FLOAT.optionalFieldOf("jitter", 0.7F).forGetter((o) -> o.jitter),
+    		Codec.FLOAT.optionalFieldOf("rareBiomeChance", 0.05F).forGetter((o) -> o.rareBiomeChance)
+    	).apply(instance, Islands::new));
+    	
+    	// true to scatter islands across the ocean at all
+    	public boolean enabled;
+    	// average distance, in blocks, between island grid points
+    	public int spacing;
+    	// chance, 0-1, that any one grid point actually holds an island
+    	public float chance;
+    	// smallest possible island radius, in blocks
+    	public float minRadius;
+    	// largest possible island radius, in blocks
+    	public float maxRadius;
+    	// how far an island's centre can drift from its grid point, 0-1
+    	public float jitter;
+    	// chance, 0-1, that an island is eligible to host an isolated biome such as Mushroom Fields
+    	public float rareBiomeChance;
+    	
+    	public Islands(boolean enabled, int spacing, float chance, float minRadius, float maxRadius, float jitter, float rareBiomeChance) {
+    		this.enabled = enabled;
+    		this.spacing = spacing;
+    		this.chance = chance;
+    		this.minRadius = minRadius;
+    		this.maxRadius = maxRadius;
+    		this.jitter = jitter;
+    		this.rareBiomeChance = rareBiomeChance;
+    	}
+    	
+    	public static Islands makeDefault() {
+    		return new Islands(true, 600, 0.2F, 32.0F, 128.0F, 0.7F, 0.05F);
+    	}
+    	
+    	public Islands copy() {
+    		return new Islands(this.enabled, this.spacing, this.chance, this.minRadius, this.maxRadius, this.jitter, this.rareBiomeChance);
+    	}
     }
 }

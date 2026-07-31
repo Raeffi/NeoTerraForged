@@ -38,15 +38,14 @@ public class Cell {
     public int continentX;
     public int continentZ;
     public boolean erosionMask;
+    public boolean mushroomIsland;
     public Terrain terrain;
     public BiomeType biome;
     public float erosion;
     public float weirdness;
     public float temperature;
     public float moisture;
-
-    public boolean beachParametersSet;
-
+    
     @Deprecated(forRemoval = true)
     public float beachNoise;
 
@@ -79,6 +78,7 @@ public class Cell {
         this.continentX = other.continentX;
         this.continentZ = other.continentZ;
         this.erosionMask = other.erosionMask;
+        this.mushroomIsland = other.mushroomIsland;
         this.terrain = other.terrain;
         this.biome = other.biome;
         this.erosion = other.erosion;
@@ -90,7 +90,6 @@ public class Cell {
 
     public Cell reset() {
         this.copyFrom(Cell.DEFAULTS);
-        this.beachParametersSet = false;
         return this;
     }
 

@@ -1,0 +1,22 @@
+{
+  "output": {
+    "filePath": "forge-mod-context.txt",
+    "style": "xml"
+  },
+  "include": [
+    "src/main/java/**/*",
+    "src/main/resources/data/**/*",
+    "build.gradle",
+    "gradle.properties"
+  ],
+  "ignore": {
+    "customPatterns": [
+      "**/build/**",
+      "**/.gradle/**",
+      "**/run/**",
+      "**/.mixin.out/**",
+      "**/src/generated/**",
+      "*.jar"
+    ]
+  }
+}

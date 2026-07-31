@@ -16,11 +16,11 @@ import raccoonman.reterraforged.world.worldgen.cell.climate.Climate;
 import raccoonman.reterraforged.world.worldgen.cell.continent.Continent;
 import raccoonman.reterraforged.world.worldgen.cell.continent.ContinentLerper2;
 import raccoonman.reterraforged.world.worldgen.cell.continent.ContinentLerper3;
+import raccoonman.reterraforged.world.worldgen.cell.continent.island.IslandContinent;
 import raccoonman.reterraforged.world.worldgen.cell.rivermap.Rivermap;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.Blender;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.Populators;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.TerrainType;
-import raccoonman.reterraforged.world.worldgen.cell.terrain.populator.IslandPopulator;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.populator.VolcanoPopulator;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.provider.TerrainProvider;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.region.RegionLerper;
@@ -47,6 +47,11 @@ public record Heightmap(CellPopulator terrain, CellPopulator region, Continent c
         this.continent.apply(cell, x, z);
         this.region.apply(cell, x, z);
         this.terrain.apply(cell, x * this.terrainFrequency, z * this.terrainFrequency);
+        if (cell.mushroomIsland) {
+        	// overrides whatever the ordinary terrain populator picked, so CellSampler's
+        	// existing "cell.terrain == TerrainType.MUSHROOM_FIELDS" check can find it
+        	cell.terrain = TerrainType.MUSHROOM_FIELDS;
+        }
 	}
 	
 	public void applyRivers(Cell cell, float x, float z, Rivermap rivermap) {
@@ -122,6 +127,7 @@ public record Heightmap(CellPopulator terrain, CellPopulator region, Continent c
         CellPopulator terrainBlend = new RegionLerper(terrainRegionBorders, terrainRegions);
         CellPopulator mountains = Populators.makeMountainChain(mountainSeed, ground, terrainSettings.mountains, terrainSettings.general.legacyMountainScaling ? 1.0F : terrainSettings.mountains.horizontalScale * 2.25F, terrainSettings.general.legacyMountainScaling ? globalVerticalScale : globalVerticalScale * terrainSettings.mountains.verticalScale, general.fancyMountains, general.legacyMountainScaling);
         Continent continent = world.continent.continentType.create(ctx.seed, ctx);
+        continent = new IslandContinent(continent, ctx.seed.offset(281734), ctx);
         Climate climate = Climate.make(continent, ctx);
         CellPopulator land = new Blender(mountainShape, terrainBlend, mountains, 0.3F, 0.8F, 0.575F);
         
@@ -129,17 +135,11 @@ public record Heightmap(CellPopulator terrain, CellPopulator region, Continent c
         CellPopulator shallowOcean = Populators.makeShallowOcean(ctx.levels);
         CellPopulator coast = Populators.makeCoast(ctx.levels);
         
-        //pass coast/ocean spline to makeIslandPopulator instead of deepOcean
-//        CellPopulator islandsOceans = new ContinentLerper3(coast, shallowOcean, deepOcean, controlPoints.deepOcean, controlPoints.shallowOcean, controlPoints.coast);
-        CellPopulator oceans = new ContinentLerper3(deepOcean, shallowOcean, land, controlPoints.deepOcean, controlPoints.shallowOcean, controlPoints.inland, Interpolation.CURVE3);
+        CellPopulator oceans = new ContinentLerper3(deepOcean, shallowOcean, coast, controlPoints.deepOcean, controlPoints.shallowOcean, controlPoints.coast);
         CellPopulator terrain = new ContinentLerper2(oceans, land, controlPoints.shallowOcean, controlPoints.inland);
 
         Noise beachNoise = Noises.perlin2(ctx.seed.next(), 20, 1);
         beachNoise = Noises.mul(beachNoise, ctx.levels.scale(5));
         return new Heightmap(terrain, region, continent, climate, levels, controlPoints, terrainFrequency, beachNoise);
-	}
-	
-	private static CellPopulator makeIslandPopulator(GeneratorContext ctx, ControlPoints controlPoints, CellPopulator oceans) {
-        return new IslandPopulator(ctx.levels, oceans, controlPoints.islandCoast, controlPoints.islandInland);
 	}
 }
