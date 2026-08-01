@@ -32,6 +32,7 @@ import raccoonman.reterraforged.world.worldgen.noise.function.Interpolation;
 import raccoonman.reterraforged.world.worldgen.noise.module.Noise;
 import raccoonman.reterraforged.world.worldgen.noise.module.Noises;
 import raccoonman.reterraforged.world.worldgen.util.Seed;
+import raccoonman.reterraforged.world.worldgen.cell.continent.island.IslandContinent;
 
 public record Heightmap(CellPopulator terrain, CellPopulator region, Continent continent, Climate climate, Levels levels, ControlPoints controlPoints, float terrainFrequency, Noise beachNoise) {
 	
@@ -40,19 +41,24 @@ public record Heightmap(CellPopulator terrain, CellPopulator region, Continent c
 		this.applyRivers(cell, x, z, this.continent.getRivermap(cell));
 		this.applyClimate(cell, x, z, applyClimate);
 	}
-	
-	public void applyTerrain(Cell cell, float x, float z) {
+
+    public void applyTerrain(Cell cell, float x, float z) {
         cell.terrain = TerrainType.FLATS;
         cell.beachNoise = this.beachNoise.compute(x, z, 0);
         this.continent.apply(cell, x, z);
         this.region.apply(cell, x, z);
-        this.terrain.apply(cell, x * this.terrainFrequency, z * this.terrainFrequency);
-        if (cell.mushroomIsland) {
-        	// overrides whatever the ordinary terrain populator picked, so CellSampler's
-        	// existing "cell.terrain == TerrainType.MUSHROOM_FIELDS" check can find it
-        	cell.terrain = TerrainType.MUSHROOM_FIELDS;
+        if (!IslandContinent.isIsland(cell)) {
+            // island cells already have their own terrain/height set by IslandContinent;
+            // applying the mainland's own ocean/land populator here would immediately
+            // overwrite it using the mainland's control points and full terrain chain
+            this.terrain.apply(cell, x * this.terrainFrequency, z * this.terrainFrequency);
         }
-	}
+        if (cell.mushroomIsland) {
+            // overrides whatever the ordinary terrain populator picked, so CellSampler's
+            // existing "cell.terrain == TerrainType.MUSHROOM_FIELDS" check can find it
+            cell.terrain = TerrainType.MUSHROOM_FIELDS;
+        }
+    }
 	
 	public void applyRivers(Cell cell, float x, float z, Rivermap rivermap) {
         rivermap.apply(cell, x, z);

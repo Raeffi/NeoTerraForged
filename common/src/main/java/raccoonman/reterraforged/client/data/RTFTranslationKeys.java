@@ -154,6 +154,7 @@ public final class RTFTranslationKeys {
 	public static final String GUI_SLIDER_STRATA_REGION_SIZE = resolve("gui.slider.strataRegionSize");
 	public static final String GUI_SLIDER_MOUNTAIN_BIOME_USAGE = resolve("gui.slider.mountainBiomeUsage");
 	public static final String GUI_SLIDER_VOLCANO_BIOME_USAGE = resolve("gui.slider.volcanoBiomeUsage");
+	public static final String GUI_SLIDER_ISLAND_CONTINENT_BUFFER = resolve("gui.slider.islandContinentBuffer");
 
 	public static final String GUI_LABEL_PREVIEW_AREA = resolve("gui.label.previewArea");
 	public static final String GUI_LABEL_PREVIEW_TERRAIN = resolve("gui.label.previewTerrain");

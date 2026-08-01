@@ -35,6 +35,7 @@ public class WorldSettingsPage extends PresetEditorPage {
 	private Slider beach;
 	private Slider coast;
 	private Slider inland;
+	private Slider islandContinentBuffer;
 	
 	private CycleButton<SpawnType> spawnType;
 	private Slider worldHeight;
@@ -129,6 +130,11 @@ public class WorldSettingsPage extends PresetEditorPage {
 			this.regenerate();
 			return value;
 		});
+		this.islandContinentBuffer = PresetWidgets.createFloatSlider(world.islands.continentBuffer, 0.0F, 0.5F, RTFTranslationKeys.GUI_SLIDER_ISLAND_CONTINENT_BUFFER, (slider, value) -> {
+			world.islands.continentBuffer = (float) slider.scaleValue(value);
+			this.regenerate();
+			return value;
+		});
 		this.deepOcean = PresetWidgets.createFloatSlider(controlPoints.deepOcean, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_DEEP_OCEAN, (slider, value) -> {
 			value = Mth.clamp(value, this.islandCoast.getValue(), this.shallowOcean.getValue());
 			controlPoints.deepOcean = (float) slider.scaleValue(value);
@@ -198,11 +204,13 @@ public class WorldSettingsPage extends PresetEditorPage {
 		this.left.addWidget(PresetWidgets.createLabel(RTFTranslationKeys.GUI_LABEL_CONTROL_POINTS));
 		this.left.addWidget(this.islandInland);
 		this.left.addWidget(this.islandCoast);
+		this.left.addWidget(this.islandContinentBuffer);
 		this.left.addWidget(this.deepOcean);
 		this.left.addWidget(this.shallowOcean);
 		this.left.addWidget(this.beach);
 		this.left.addWidget(this.coast);
 		this.left.addWidget(this.inland);
+
 		
 		this.left.addWidget(PresetWidgets.createLabel(RTFTranslationKeys.GUI_LABEL_PROPERTIES));
 		this.left.addWidget(this.spawnType);
