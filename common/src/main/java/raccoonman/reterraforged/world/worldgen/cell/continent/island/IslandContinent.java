@@ -48,8 +48,8 @@ public class IslandContinent implements Continent {
 	private final int seed;
 	private final float frequency;
 	private final float jitter;
-	private float minRadius = 8.0f; // Increased from 8.0f
-	private float maxRadius = 32.0f; // Increased from 8.0f
+	private float minRadius = 32.0f; // Increased from 8.0f
+	private float maxRadius = 256.0f; // Increased from 32.0f
 	private final WorldSettings.ControlPoints controlPoints;
 
 	private float scaleMultiplier = 2.0f; // Added scaling factor
@@ -59,6 +59,7 @@ public class IslandContinent implements Continent {
 	private final float radiusScale;
 
 	private final Domain warp;
+	private final Domain warpDistort;  // New noise domain for shape distortion
 	private final CellPopulator terrainBlend;
 	private final float seaLevel; // Added sea level variable
 
@@ -72,8 +73,9 @@ public class IslandContinent implements Continent {
 		this.jitter = settings.jitter;
 		this.minRadius = Math.max(8.0F, settings.minRadius);
 		// Compute scale based on islandCoast control point
-		float coastWeight = NoiseUtil.clamp(this.controlPoints.islandCoast, 0.0F, 1.0F);
-		this.maxRadius = Math.max(this.minRadius, this.minRadius * (coastWeight + 1.5F));
+		float coastWeight = this.controlPoints.islandCoast;
+		float oceanWeight = this.controlPoints.deepOcean;
+		this.maxRadius = this.minRadius + (this.maxRadius - this.minRadius) * (coastWeight / oceanWeight);
 		this.chance = NoiseUtil.clamp(settings.chance, 0.0F, 1.0F);
 		this.rareBiomeChance = NoiseUtil.clamp(settings.rareBiomeChance, 0.0F, 1.0F);
 		this.continentBuffer = Math.max(0.0F, settings.continentBuffer);
@@ -85,12 +87,15 @@ public class IslandContinent implements Continent {
 		int warpScale = Math.max(8, Math.round(this.maxRadius * 0.6F));
 		this.warp = Domains.domainPerlin(seed.next(), warpScale, 2, this.maxRadius * 0.3F);
 
+		// Add new noise domain for shape distortion
+		this.warpDistort = Domains.domainPerlin(seed.next(), warpScale, 2, this.maxRadius * 0.3F);
+
 		// islandInland now also controls physical island SIZE, the same way a continent's
 		// own control points affect how much of its noise field reads as land: a larger
 		// islandInland value grows the island's core and, via this scale, its whole footprint.
 		// Adjust radiusScale based on islandInland and islandCoast
 		float inlandFraction = NoiseUtil.clamp(this.controlPoints.islandInland, 0.0F, 1.0F);
-		this.radiusScale = NoiseUtil.lerp(0.5F, 2.0F * this.scaleMultiplier, inlandFraction);
+		this.radiusScale = NoiseUtil.lerp(1.0F, 2.0F * this.scaleMultiplier, inlandFraction);
 
 		// islandCoast/islandInland define a band along the island's own radius (as alpha
 		// fractions, 0 = outer edge, 1 = centre) that marks where the coast populator gives
@@ -200,6 +205,12 @@ public class IslandContinent implements Continent {
 		float centerX = px;
 		float centerZ = pz;
 		float nearest = Float.MAX_VALUE;
+
+		// Add noise distortion to the base distance calculation using getX() and getZ()
+		Vec2f cell = NoiseUtil.cell(this.seed, gridX, gridZ);
+		float noiseX = this.warpDistort.getX(this.seed,cell.x(), 0);
+		float noiseZ = this.warpDistort.getZ(this.seed,cell.y(), 0);
+
 		for (int dz = -1; dz <= 1; ++dz) {
 			for (int dx = -1; dx <= 1; ++dx) {
 				int cx = xr + dx;
@@ -207,7 +218,11 @@ public class IslandContinent implements Continent {
 				Vec2f offset = NoiseUtil.cell(this.seed, cx, cz);
 				float cxf = cx + offset.x() * this.jitter;
 				float czf = cz + offset.y() * this.jitter;
-				float dist = NoiseUtil.dist2(cxf, czf, px, pz);
+
+				// Apply noise distortion to the distance calculation using both X and Z components
+				float dist = NoiseUtil.dist2(cxf, czf, px, pz)
+						* (1.0f + (noiseX + noiseZ) * 0.5f);
+
 				if (dist < nearest) {
 					nearest = dist;
 					gridX = cx;
@@ -217,6 +232,7 @@ public class IslandContinent implements Continent {
 				}
 			}
 		}
+
 		if (this.roll(1, gridX, gridZ) > this.chance) {
 			// this grid point rolled "no island"
 			return null;
