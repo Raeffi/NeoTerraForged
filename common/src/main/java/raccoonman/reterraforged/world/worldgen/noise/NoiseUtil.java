@@ -172,9 +172,13 @@ public class NoiseUtil {
     
     public static float valCoord2D(int seed, int x, int y) {
         int n = seed;
-        n ^= 1619 * x;
-        n ^= 31337 * y;
-        return n * n * n * 60493 / 2.14748365E9F;
+        n ^= x * 1619;
+        n ^= y * 31337;
+        n *= 60493;
+        n ^= n >>> 13;
+        n *= 19990303;
+        n ^= n >>> 16;
+        return (n & 0x7fffffff) / (float)0x7fffffff;
     }
     
     public static Vec2f coord2D(int seed, int x, int y) {

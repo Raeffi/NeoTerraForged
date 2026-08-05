@@ -28,6 +28,7 @@ public class WorldSettingsPage extends PresetEditorPage {
 	private Slider continentNoiseGain;
 	private Slider continentNoiseLacunarity;
 
+	private Slider islandChance;
 	private Slider islandInland;
 	private Slider islandCoast;
 	private Slider deepOcean;
@@ -118,6 +119,17 @@ public class WorldSettingsPage extends PresetEditorPage {
 		
 		this.applyContinentType(this.continentType.getValue());
 
+		this.islandChance = PresetWidgets.createFloatSlider(
+				world.islands.chance,
+				0.0F,
+				1.0F,
+				RTFTranslationKeys.GUI_SLIDER_ISLAND_CHANCE,  // Translation key
+				(slider, value) -> {
+					world.islands.chance = (float) slider.scaleValue(value);
+					this.regenerate();
+					return value;
+				}
+		);
 		this.islandInland = PresetWidgets.createFloatSlider(controlPoints.islandInland, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_ISLAND_INLAND, (slider, value) -> {
 			value = Math.min(value, this.islandCoast.getValue());
 			controlPoints.islandInland = (float) slider.scaleValue(value);
@@ -202,6 +214,7 @@ public class WorldSettingsPage extends PresetEditorPage {
 		this.left.addWidget(this.continentNoiseLacunarity);
 
 		this.left.addWidget(PresetWidgets.createLabel(RTFTranslationKeys.GUI_LABEL_CONTROL_POINTS));
+		this.left.addWidget(this.islandChance);
 		this.left.addWidget(this.islandInland);
 		this.left.addWidget(this.islandCoast);
 		this.left.addWidget(this.islandContinentBuffer);

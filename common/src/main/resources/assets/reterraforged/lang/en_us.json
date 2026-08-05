@@ -151,6 +151,8 @@
   "reterraforged.gui.slider.mountainBiomeUsage": "Mountain Biome Usage",
   "reterraforged.gui.slider.volcanoBiomeUsage": "Volcano Biome Usage",
 
+  "reterraforged.gui.slider.island_chance": "Island Chance: %.2f",
+
   "reterraforged.gui.label.previewArea": "Area: ",
   "reterraforged.gui.label.previewTerrain": "Terrain: ",
   "reterraforged.gui.label.previewBiome": "Biome: ",

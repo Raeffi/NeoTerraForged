@@ -70,6 +70,7 @@ public final class RTFTranslationKeys {
 	public static final String GUI_SLIDER_CONTINENT_NOISE_OCTAVES = resolve("gui.slider.continentNoiseOctaves");
 	public static final String GUI_SLIDER_CONTINENT_NOISE_GAIN = resolve("gui.slider.continentNoiseGain");
 	public static final String GUI_SLIDER_CONTINENT_NOISE_LACUNARITY = resolve("gui.slider.continentNoiseLacunarity");
+	public static final String GUI_SLIDER_ISLAND_CHANCE = resolve("gui.slider.island_chance");
 	public static final String GUI_SLIDER_ISLAND_INLAND = resolve("gui.slider.islandInland");
 	public static final String GUI_SLIDER_ISLAND_COAST = resolve("gui.slider.islandCoast");
 	public static final String GUI_SLIDER_DEEP_OCEAN = resolve("gui.slider.deepOcean");
