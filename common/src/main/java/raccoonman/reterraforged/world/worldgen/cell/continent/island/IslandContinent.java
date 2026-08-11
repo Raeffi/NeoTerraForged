@@ -8,13 +8,12 @@ import raccoonman.reterraforged.world.worldgen.GeneratorContext;
 import raccoonman.reterraforged.world.worldgen.cell.Cell;
 import raccoonman.reterraforged.world.worldgen.cell.CellPopulator;
 import raccoonman.reterraforged.world.worldgen.cell.continent.Continent;
-import raccoonman.reterraforged.world.worldgen.cell.continent.ContinentLerper2;
+import raccoonman.reterraforged.world.worldgen.cell.continent.ContinentLerper3;
 import raccoonman.reterraforged.world.worldgen.cell.heightmap.Levels;
 import raccoonman.reterraforged.world.worldgen.cell.rivermap.Rivermap;
 import raccoonman.reterraforged.world.worldgen.cell.rivermap.gen.GenWarp;
 import raccoonman.reterraforged.world.worldgen.cell.rivermap.river.Network;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.Populators;
-import raccoonman.reterraforged.world.worldgen.cell.terrain.Terrain;
 import raccoonman.reterraforged.world.worldgen.noise.NoiseUtil;
 import raccoonman.reterraforged.world.worldgen.noise.NoiseUtil.Vec2f;
 import raccoonman.reterraforged.world.worldgen.noise.domain.Domain;
@@ -39,11 +38,10 @@ public class IslandContinent implements Continent {
 	private final float rareBiomeChance;
 	private final float continentBuffer;
 	private final float radiusScale;
-	private final float seaLevel;
 
 	private final Domain warp;
+	private final Noise shapeNoise;
 
-	// Only blends Coast and Plains. The underwater slope is handled purely by geometric math now!
 	private final CellPopulator terrainBlend;
 
 	public IslandContinent(Continent delegate, Seed seed, GeneratorContext context) {
@@ -66,10 +64,10 @@ public class IslandContinent implements Continent {
 		this.rareBiomeChance = NoiseUtil.clamp(settings.rareBiomeChance, 0.0F, 1.0F);
 		this.continentBuffer = Math.max(0.0F, settings.continentBuffer);
 		this.seed = seed.next();
-		this.seaLevel = context.levels.waterY * context.levels.unit;
 
 		int warpScale = Math.max(8, Math.round(this.maxRadius * 0.6F));
 		this.warp = Domains.domainPerlin(seed.next(), warpScale, 2, this.maxRadius * 0.3F);
+		this.shapeNoise = PresetNoiseData.getNoise(context.noiseLookup, PresetTerrainTypeNoise.GROUND);
 		this.radiusScale = 1.0F;
 
 		Levels levels = context.levels;
@@ -78,12 +76,15 @@ public class IslandContinent implements Continent {
 		TerrainSettings.Terrain plainsSettings = context.preset.terrain().plains;
 		float verticalScale = context.preset.terrain().general.globalVerticalScale;
 
+		CellPopulator seaPopulator = (seaCell, seaX, seaZ) -> {};
 		CellPopulator coastPopulator = Populators.makeCoast(levels);
 		CellPopulator landPopulator = Populators.makePlains(islandSeed, ground, plainsSettings, verticalScale);
 
-		this.terrainBlend = new ContinentLerper2(
+		this.terrainBlend = new ContinentLerper3(
+				seaPopulator,
 				coastPopulator,
 				landPopulator,
+				this.controlPoints.shallowOcean,
 				this.controlPoints.coast,
 				this.controlPoints.inland
 		);
@@ -93,15 +94,16 @@ public class IslandContinent implements Continent {
 		return cell.continentX >= ISLAND_MARKER && cell.continentZ >= ISLAND_MARKER;
 	}
 
+	private float alphaToEdge(float alpha) {
+		float curved = NoiseUtil.curve(alpha, 0.6F, 3.0F);
+		return NoiseUtil.lerp(this.controlPoints.shallowOcean, 1.0F, curved);
+	}
+
 	@Override
 	public void apply(Cell cell, float x, float z) {
-		// Allow the mainland generator to establish the baseline deep ocean floor
 		this.delegate.apply(cell, x, z);
-		float baseHeight = cell.height;
-		float baseEdge = cell.continentEdge;
-		Terrain baseTerrain = cell.terrain;
 
-		if (!this.enabled || baseEdge >= this.controlPoints.shallowOcean) {
+		if (!this.enabled || cell.continentEdge >= this.controlPoints.shallowOcean) {
 			return;
 		}
 
@@ -110,42 +112,37 @@ public class IslandContinent implements Continent {
 			return;
 		}
 
-		// Map the physical footprint cleanly to our biome edges
-		float islandEdge = baseEdge + (1.0F - baseEdge) * sample.alpha;
-		cell.continentEdge = islandEdge;
+		float baseEdge = cell.continentEdge;
+		float islandEdge = this.alphaToEdge(sample.alpha);
 
-		// Calculate what the above-water land shape looks like at this edge
-		this.terrainBlend.apply(cell, x, z);
-		float landHeight = cell.height;
-		Terrain landTerrain = cell.terrain;
-
-		float finalHeight;
-		Terrain finalTerrain;
-
-		if (islandEdge >= this.controlPoints.coast) {
-			// Above water (Beach & Inland)
-			finalHeight = landHeight;
-			finalTerrain = landTerrain;
+		// 1. Smoothly blend the edge values natively to avoid sharp cutoffs.
+		// By blending the edge (instead of the height directly), terrainBlend
+		// accurately assigns the COAST biome without dunking beaches underwater.
+		float blendMargin = 0.15F; // Maps to approx 10-30 blocks width
+		if (sample.alpha < blendMargin) {
+			float t = sample.alpha / blendMargin;
+			t = t * t * (3.0F - 2.0F * t); // Smoothstep curve
+			islandEdge = NoiseUtil.lerp(baseEdge, islandEdge, t);
 		} else {
-			// Underwater slope: bridge the ocean floor to the perfectly flat beach
-			float range = this.controlPoints.coast - baseEdge;
-			float t = (islandEdge - baseEdge) / Math.max(1.0E-5F, range);
-			t = NoiseUtil.clamp(t, 0.0F, 1.0F);
-
-			// Smoothstep to ensure zero-derivative at both the sea floor and the beach (no kinks!)
-			t = t * t * (3.0F - 2.0F * t);
-
-			finalHeight = NoiseUtil.lerp(baseHeight, landHeight, t);
-			finalTerrain = baseTerrain; // Keep ocean terrain decor underwater
+			islandEdge = Math.max(baseEdge, islandEdge);
 		}
 
-		cell.height = finalHeight;
-		cell.terrain = cell.height >= this.seaLevel ? landTerrain : finalTerrain;
+		cell.continentEdge = islandEdge;
 
+		// 2. Let the mainland lerper assign COAST terrain using the smoothed edge
+		this.terrainBlend.apply(cell, x, z);
+
+		// 3. Keep unique island shapes/biomes...
 		cell.continentId = this.roll(4, sample.gridX, sample.gridZ);
-		cell.continentX = ISLAND_MARKER + sample.gridX;
-		cell.continentZ = ISLAND_MARKER + sample.gridZ;
-		if (sample.mushroom && cell.continentEdge >= this.controlPoints.coast) {
+
+		// 4. FIX FOR BEACHES: Purposefully assign coordinates well below ISLAND_MARKER.
+		// This forces isIsland() to evaluate to 'false' everywhere, successfully tricking
+		// TerraForged into allowing mainland sandy beach biomes around the islands just
+		// like in the originally "bugged" quadrants.
+		cell.continentX = sample.gridX - ISLAND_MARKER;
+		cell.continentZ = sample.gridZ - ISLAND_MARKER;
+
+		if (sample.mushroom && islandEdge >= this.controlPoints.coast) {
 			cell.mushroomIsland = true;
 		}
 	}
@@ -157,7 +154,20 @@ public class IslandContinent implements Continent {
 			return base;
 		}
 		IslandSample sample = this.sample(x, z);
-		return sample != null ? base + (1.0F - base) * sample.alpha : base;
+		if (sample == null || sample.alpha <= 0.0F) {
+			return base;
+		}
+
+		float islandEdge = this.alphaToEdge(sample.alpha);
+		float blendMargin = 0.15F;
+
+		// 5. Must strictly mirror the apply() blending here so chunks match flawlessly
+		if (sample.alpha < blendMargin) {
+			float t = sample.alpha / blendMargin;
+			t = t * t * (3.0F - 2.0F * t);
+			return NoiseUtil.lerp(base, islandEdge, t);
+		}
+		return Math.max(base, islandEdge);
 	}
 
 	@Override
@@ -167,7 +177,20 @@ public class IslandContinent implements Continent {
 			return base;
 		}
 		IslandSample sample = this.sample(x, z);
-		return sample != null ? base + (1.0F - base) * sample.alpha : base;
+		if (sample == null || sample.alpha <= 0.0F) {
+			return base;
+		}
+
+		float islandEdge = this.alphaToEdge(sample.alpha);
+		float blendMargin = 0.15F;
+
+		// 5. Must strictly mirror the apply() blending here so chunks match flawlessly
+		if (sample.alpha < blendMargin) {
+			float t = sample.alpha / blendMargin;
+			t = t * t * (3.0F - 2.0F * t);
+			return NoiseUtil.lerp(base, islandEdge, t);
+		}
+		return Math.max(base, islandEdge);
 	}
 
 	@Override
@@ -197,7 +220,6 @@ public class IslandContinent implements Continent {
 		int bestGridZ = zr;
 		boolean found = false;
 
-		// Search radius widened to account for the massive gentle slopes
 		int searchRadius = Math.max(2, (int) Math.ceil(this.maxRadius * 5.0F * this.frequency));
 
 		for (int dz = -searchRadius; dz <= searchRadius; ++dz) {
@@ -217,16 +239,20 @@ public class IslandContinent implements Continent {
 				float worldZ = czf / this.frequency;
 
 				float continentEdgeAtCenter = this.delegate.getEdgeValue(worldX, worldZ);
-
-				// Hard exclusion check: No more flattened "pancakes" near the mainland
 				float bufferStart = this.controlPoints.shallowOcean - this.continentBuffer;
 				if (continentEdgeAtCenter >= bufferStart) {
 					continue;
 				}
 
-				// 4.5F multiplier drastically stretches the footprint, making slopes 4-5x less steep
 				float baseRadius = NoiseUtil.lerp(this.minRadius, this.maxRadius, this.roll(2, cx, cz)) * this.radiusScale;
-				float totalRadius = baseRadius * 4.5F;
+
+				float nVal = this.shapeNoise.compute(wx * 0.02F, wz * 0.02F, this.seed + 100);
+				float nMin = this.shapeNoise.minValue();
+				float nMax = this.shapeNoise.maxValue();
+				float normNoise = (nMax != nMin) ? (nVal - nMin) / (nMax - nMin) : 0.5F;
+
+				float shapeModifier = 0.65F + (normNoise * 0.70F);
+				float totalRadius = baseRadius * 4.5F * shapeModifier;
 
 				float dist = NoiseUtil.sqrt(NoiseUtil.dist2(worldX, worldZ, wx, wz));
 				if (dist >= totalRadius) {
@@ -236,7 +262,6 @@ public class IslandContinent implements Continent {
 				float normDist = dist / totalRadius;
 				float alpha = 1.0F - normDist;
 
-				// Base presence curve
 				alpha = alpha * alpha * (3.0F - 2.0F * alpha);
 
 				if (alpha > maxAlpha) {
