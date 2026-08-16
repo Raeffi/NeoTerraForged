@@ -71,15 +71,19 @@ public class IslandContinent implements Continent {
 		return Math.abs(cell.continentX) >= ISLAND_MARKER && Math.abs(cell.continentZ) >= ISLAND_MARKER;
 	}
 
-	// FIXED: Simplified logic to force islands to be LAND, not shallow ocean
 	private float alphaToEdge(float baseEdge, float alpha, float steepness) {
 		float shallow = this.controlPoints.shallowOcean;
 		float coast = this.controlPoints.coast;
 		float inland = this.controlPoints.inland;
 
-		// Very small transition zones for seabed/beach to ensure max land
-		float waterZoneEnd = 0.05F;
-		float beachZoneEnd = 0.15F;
+		// zone widths are fixed fractions of alpha, so they scale with the
+		// island's own radius instead of shrinking to a fixed distance -
+		// this keeps the underwater slope equally gradual on small and big islands
+		float waterZoneEnd = 0.35F;
+		// cliffs only appear where steepness is high (inland pushing straight into
+		// the ocean); everywhere else the beach zone stays wide and gradual
+		float beachZoneWidth = NoiseUtil.lerp(0.45F, 0.05F, NoiseUtil.clamp(steepness, 0.0F, 1.0F));
+		float beachZoneEnd = waterZoneEnd + beachZoneWidth;
 
 		if (alpha < waterZoneEnd) {
 			float t = NoiseUtil.clamp(alpha / waterZoneEnd, 0.0F, 1.0F);
@@ -111,7 +115,16 @@ public class IslandContinent implements Continent {
 			return;
 		}
 
-		float islandEdge = this.alphaToEdge(cell.continentEdge, sample.alpha, sample.steepness);
+		// fade the island out as the actual queried point nears the continent,
+		// not just as the island's own centre does - otherwise a large island's
+		// far edge can still reach the continent even when its centre passes
+		float pointBufferMul = this.pointBufferMultiplier(cell.continentEdge);
+		float alpha = sample.alpha * pointBufferMul;
+		if (alpha <= 0.0F) {
+			return;
+		}
+
+		float islandEdge = this.alphaToEdge(cell.continentEdge, alpha, sample.steepness);
 		cell.continentEdge = islandEdge;
 
 		cell.continentId = this.roll(4, sample.gridX, sample.gridZ);
@@ -133,7 +146,11 @@ public class IslandContinent implements Continent {
 		if (sample == null || sample.alpha <= 0.0F) {
 			return base;
 		}
-		return this.alphaToEdge(base, sample.alpha, sample.steepness);
+		float alpha = sample.alpha * this.pointBufferMultiplier(base);
+		if (alpha <= 0.0F) {
+			return base;
+		}
+		return this.alphaToEdge(base, alpha, sample.steepness);
 	}
 
 	@Override
@@ -146,7 +163,11 @@ public class IslandContinent implements Continent {
 		if (sample == null || sample.alpha <= 0.0F) {
 			return base;
 		}
-		return this.alphaToEdge(base, sample.alpha, sample.steepness);
+		float alpha = sample.alpha * this.pointBufferMultiplier(base);
+		if (alpha <= 0.0F) {
+			return base;
+		}
+		return this.alphaToEdge(base, alpha, sample.steepness);
 	}
 
 	@Override
@@ -180,7 +201,7 @@ public class IslandContinent implements Continent {
 		int bestGridZ = zr;
 		boolean found = false;
 
-		float maxPossibleRadius = (this.maxRadius * 6.5F * 2.0F) + (this.maxRadius * 4.0F);
+		float maxPossibleRadius = (this.maxRadius * 6.5F * 2.5F) + (this.maxRadius * 4.0F);
 		int searchRadius = Math.max(6, (int) Math.ceil(maxPossibleRadius * this.frequency) + 2);
 
 		for (int dz = -searchRadius; dz <= searchRadius; ++dz) {
@@ -197,7 +218,18 @@ public class IslandContinent implements Continent {
 				float worldZ = czf / this.frequency;
 
 				float continentEdgeAtCenter = this.delegate.getEdgeValue(worldX, worldZ);
-				if (continentEdgeAtCenter >= this.controlPoints.shallowOcean - this.continentBuffer) continue;
+				float bufferStart = this.controlPoints.shallowOcean - this.continentBuffer;
+				float bufferEnd = this.controlPoints.shallowOcean;
+				if (continentEdgeAtCenter >= bufferEnd) continue;
+
+				// scale the island smoothly to zero across the buffer band instead of
+				// admitting or rejecting it outright at one threshold
+				float bufferMul = 1.0F;
+				if (this.continentBuffer > 0.0F && continentEdgeAtCenter > bufferStart) {
+					float t = NoiseUtil.clamp((continentEdgeAtCenter - bufferStart) / this.continentBuffer, 0.0F, 1.0F);
+					t = t * t * (3.0F - 2.0F * t);
+					bufferMul = 1.0F - t;
+				}
 
 				float baseRadius = NoiseUtil.lerp(this.minRadius, this.maxRadius, this.roll(2, cx, cz)) * this.radiusScale;
 				float nx = dwx * 0.0015F;
@@ -229,9 +261,29 @@ public class IslandContinent implements Continent {
 				float dist = NoiseUtil.sqrt(NoiseUtil.dist2(worldX, worldZ, dwx, dwz));
 				if (dist >= totalRadius) continue;
 
-				float baseAlpha = (1.0F - (dist / totalRadius));
+// angle-based lobing: gives each island 2-4 bays/peninsulas instead of a circle
+				float angle = (float) Math.atan2(worldX - dwx, worldZ - dwz);
+				float lobePhase = this.roll(5, cx, cz) * 6.2831855F;
+				int lobeCount = 2 + (int) (this.roll(6, cx, cz) * 3.0F);
+				float lobe = 0.72F + 0.28F * NoiseUtil.cos(angle * lobeCount + lobePhase);
+
+// fine noise along the outline for cliff/beach roughness
+				float outlineNoise = this.shapeNoise.compute(
+						dwx * 0.06F + NoiseUtil.cos(angle) * 8.0F,
+						dwz * 0.06F + NoiseUtil.sin(angle) * 8.0F,
+						this.seed + 106
+				);
+				float outlineNorm = range != 0 ? (outlineNoise - nMin) / range : 0.5F;
+				float outlineDistort = 1.0F + (outlineNorm - 0.5F) * 0.28F;
+
+				float lobedRadius = totalRadius * lobe * outlineDistort;
+				// fixed-width falloff band (in blocks) instead of a ratio of the radius,
+				// so lobe/bay directions don't compress the coast into a hard cliff
+				float transitionWidth = Math.max(24.0F, this.minRadius * 0.5F);
+				float baseAlpha = NoiseUtil.clamp((lobedRadius - dist) / transitionWidth, 0.0F, 1.0F);
 				baseAlpha = baseAlpha * baseAlpha * (3.0F - 2.0F * baseAlpha);
-				float alpha = NoiseUtil.clamp(baseAlpha + ((norm3 - 0.5F) * 0.035F * baseAlpha) + ((normRipple - 0.5F) * (0.005F + (normMod * 0.050F)) * baseAlpha), 0.0F, 1.0F);
+				float alpha = NoiseUtil.clamp(baseAlpha + ((norm3 - 0.5F) * 0.08F * baseAlpha) + ((normRipple - 0.5F) * (0.015F + (normMod * 0.09F)) * baseAlpha), 0.0F, 1.0F);
+				alpha *= bufferMul;
 
 				totalAlpha += alpha;
 				if (alpha > maxSingleAlpha) {
@@ -250,6 +302,23 @@ public class IslandContinent implements Continent {
 
 	private float roll(int offset, int gridX, int gridZ) {
 		return NoiseUtil.map(NoiseUtil.valCoord2D(this.seed + offset, gridX, gridZ), -1.0F, 1.0F, 2.0F);
+	}
+
+	/**
+	 * Fades island alpha to zero as the queried point's own continent edge
+	 * value approaches the mainland, independent of the island candidate's centre.
+	 */
+	private float pointBufferMultiplier(float pointContinentEdge) {
+		if (this.continentBuffer <= 0.0F) {
+			return 1.0F;
+		}
+		float bufferStart = this.controlPoints.shallowOcean - this.continentBuffer;
+		if (pointContinentEdge <= bufferStart) {
+			return 1.0F;
+		}
+		float t = NoiseUtil.clamp((pointContinentEdge - bufferStart) / this.continentBuffer, 0.0F, 1.0F);
+		t = t * t * (3.0F - 2.0F * t);
+		return 1.0F - t;
 	}
 
 	private static final class IslandSample {
