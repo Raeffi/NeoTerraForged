@@ -47,12 +47,10 @@ public record Heightmap(CellPopulator terrain, CellPopulator region, Continent c
         cell.beachNoise = this.beachNoise.compute(x, z, 0);
         this.continent.apply(cell, x, z);
         this.region.apply(cell, x, z);
-        if (!IslandContinent.isIsland(cell)) {
-            // island cells already have their own terrain/height set by IslandContinent;
-            // applying the mainland's own ocean/land populator here would immediately
-            // overwrite it using the mainland's control points and full terrain chain
-            this.terrain.apply(cell, x * this.terrainFrequency, z * this.terrainFrequency);
-        }
+        // the terrain populator reads cell.continentEdge, which IslandContinent already
+        // shapes for island cells, so it must always run - it is the only code path
+        // that writes cell.height
+        this.terrain.apply(cell, x * this.terrainFrequency, z * this.terrainFrequency);
         if (cell.mushroomIsland) {
             // overrides whatever the ordinary terrain populator picked, so CellSampler's
             // existing "cell.terrain == TerrainType.MUSHROOM_FIELDS" check can find it

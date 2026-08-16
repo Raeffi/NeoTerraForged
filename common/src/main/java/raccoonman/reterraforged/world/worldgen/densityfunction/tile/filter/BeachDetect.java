@@ -18,34 +18,48 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
     private boolean isSteep(Filterable map, Cell cell, int x, int z) {
         float sum = 0;
         int count = 0;
-        for (int dz = -4; dz <= 4; dz += 4) {
-            for (int dx = -4; dx <= 4; dx += 4) {
+
+        for (int dz = -4; dz <= 4; dz += 2) {
+            for (int dx = -4; dx <= 4; dx += 2) {
                 Cell sample = map.getCellRaw(x + dx, z + dz);
                 if (sample.isAbsent()) continue;
+
                 float d2 = this.computeD2(map, sample, x + dx, z + dz);
                 sum += d2;
                 count++;
             }
         }
+
         if (count == 0) return false;
-        float avg = sum / count;
-        return avg >= STEEPNESS_THRESHOLD;
+
+        return sum / count >= STEEPNESS_THRESHOLD;
     }
 
     private float computeD2(Filterable map, Cell cell, int x, int z) {
-        Cell n = map.getCellRaw(x, z - 8);
-        Cell s = map.getCellRaw(x, z + 8);
-        Cell e = map.getCellRaw(x + 8, z);
-        Cell w = map.getCellRaw(x - 8, z);
+        Cell n = map.getCellRaw(x, z - 4);
+        Cell s = map.getCellRaw(x, z + 4);
+        Cell e = map.getCellRaw(x + 4, z);
+        Cell w = map.getCellRaw(x - 4, z);
+
         float gx = this.grad(e, w, cell);
         float gz = this.grad(n, s, cell);
+
         return gx * gx + gz * gz;
     }
 
     private float grad(Cell a, Cell b, Cell def) {
-        int distance = 17;
-        if (a.isAbsent()) { a = def; distance -= 8; }
-        if (b.isAbsent()) { b = def; distance -= 8; }
+        int distance = 16;
+
+        if (a.isAbsent()) {
+            a = def;
+            distance -= 8;
+        }
+
+        if (b.isAbsent()) {
+            b = def;
+            distance -= 8;
+        }
+
         return (a.height - b.height) / distance;
     }
 

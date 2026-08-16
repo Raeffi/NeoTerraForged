@@ -242,12 +242,13 @@ public class WorldSettingsPage extends PresetEditorPage {
 	public Optional<Page> next() {
 		return Optional.of(new SurfaceSettingsPage(this.screen, this.preset));
 	}
-	
+
 	private void applyContinentType(ContinentType type) {
 		this.continentShape.active = type == ContinentType.MULTI || type == ContinentType.SINGLE;
-		
+
 		boolean isMultiImproved = type == ContinentType.MULTI_IMPROVED;
-		this.continentSkipping.active = isMultiImproved;
+		boolean supportsSkipping = type == ContinentType.MULTI || type == ContinentType.SINGLE || isMultiImproved;
+		this.continentSkipping.active = supportsSkipping;
 		this.continentSizeVariance.active = isMultiImproved;
 		this.continentNoiseOctaves.active = isMultiImproved;
 		this.continentNoiseGain.active = isMultiImproved;

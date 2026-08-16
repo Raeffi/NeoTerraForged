@@ -20,11 +20,14 @@ public class BufferBitSet {
         this.sizeY = Math.max(y1, y2) - this.minY;
         this.sizeZ = Math.max(z1, z2) - this.minZ;
         this.sizeXZ = this.sizeX * this.sizeZ;
-        int size = this.sizeX * this.sizeY * this.sizeZ;
+        // sizeX/Y/Z must never be negative here; guard against bad input boxes
+        // (or int overflow on large boxes) so world gen can't crash on this
+        long size64 = (long) this.sizeX * (long) this.sizeY * (long) this.sizeZ;
+        int size = (size64 < 0 || size64 > Integer.MAX_VALUE) ? 0 : (int) size64;
         if (this.bitSet == null || this.bitSet.length() < size) {
-        	this.bitSet = new BitSet(size);
+            this.bitSet = new BitSet(size);
         } else {
-        	this.bitSet.clear();
+            this.bitSet.clear();
         }
     }
 

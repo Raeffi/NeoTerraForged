@@ -21,6 +21,9 @@ import raccoonman.reterraforged.world.worldgen.util.Seed;
 
 public abstract class ContinentGenerator implements SimpleContinent {
     protected int seed;
+    protected int skippingSeed;
+    protected boolean hasSkipping;
+    protected float skipThreshold;
     protected float frequency;
     protected int continentScale;
     private DistanceFunction distanceFunc;
@@ -38,6 +41,9 @@ public abstract class ContinentGenerator implements SimpleContinent {
         int tectonicScale = settings.continent.continentScale * 4;
         this.continentScale = settings.continent.continentScale / 2;
         this.seed = seed.next();
+        this.skippingSeed = seed.next();
+        this.skipThreshold = settings.continent.continentSkipping;
+        this.hasSkipping = this.skipThreshold > 0.0F;
         this.distanceFunc = settings.continent.continentShape;
         this.controlPoints = settings.controlPoints;
         this.frequency = 1.0F / tectonicScale;
@@ -100,13 +106,17 @@ public abstract class ContinentGenerator implements SimpleContinent {
                 }
             }
         }
-        cell.continentId = this.cellIdentity(this.seed, cellX, cellY);
-        cell.continentEdge = this.cellEdgeValue(edgeDistance, edgeDistance2);
         cell.continentX = (int) (centerX / this.frequency);
         cell.continentZ = (int) (centerY / this.frequency);
+        if (this.shouldSkip(cellX, cellY)) {
+            // leave continentId and continentEdge at default (ocean) values
+            return;
+        }
+        cell.continentId = this.cellIdentity(this.seed, cellX, cellY);
+        cell.continentEdge = this.cellEdgeValue(edgeDistance, edgeDistance2);
         cell.continentEdge *= this.getShape(x, y, cell.continentEdge);
     }
-    
+
     @Override
     public float getEdgeValue(float x, float y) {
         float ox = this.warp.getOffsetX(x, y, 0);
@@ -117,6 +127,8 @@ public abstract class ContinentGenerator implements SimpleContinent {
         py *= this.frequency;
         int xr = NoiseUtil.floor(px);
         int yr = NoiseUtil.floor(py);
+        int cellX = xr;
+        int cellY = yr;
         float edgeDistance = 999999.0F;
         float edgeDistance2 = 999999.0F;
         for (int dy = -1; dy <= 1; ++dy) {
@@ -130,11 +142,16 @@ public abstract class ContinentGenerator implements SimpleContinent {
                 if (distance < edgeDistance) {
                     edgeDistance2 = edgeDistance;
                     edgeDistance = distance;
+                    cellX = cx;
+                    cellY = cy;
                 }
                 else if (distance < edgeDistance2) {
                     edgeDistance2 = distance;
                 }
             }
+        }
+        if (this.shouldSkip(cellX, cellY)) {
+            return 0.0F;
         }
         float edgeValue = this.cellEdgeValue(edgeDistance, edgeDistance2);
         float shapeNoise = this.getShape(x, y, edgeValue);
@@ -231,7 +248,15 @@ public abstract class ContinentGenerator implements SimpleContinent {
         }
         return distance;
     }
-    
+
+    protected boolean shouldSkip(int cellX, int cellY) {
+        if (this.hasSkipping && !(cellX == 0 && cellY == 0)) {
+            float skipValue = 0.5F + NoiseUtil.valCoord2D(this.skippingSeed, cellX, cellY) * 0.5F;
+            return skipValue < this.skipThreshold;
+        }
+        return false;
+    }
+
     protected float cellIdentity(int seed, int cellX, int cellY) {
         float value = NoiseUtil.valCoord2D(seed, cellX, cellY);
         return NoiseUtil.map(value, -1.0F, 1.0F, 2.0F);

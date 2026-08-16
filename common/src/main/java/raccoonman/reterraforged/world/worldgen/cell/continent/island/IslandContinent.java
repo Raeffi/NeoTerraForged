@@ -35,6 +35,7 @@ public class IslandContinent implements Continent {
 	private final float radiusScale;
 
 	private final Domain warp;
+	private final Domain detailWarp;
 	private final Noise shapeNoise;
 
 	public IslandContinent(Continent delegate, Seed seed, GeneratorContext context) {
@@ -58,42 +59,40 @@ public class IslandContinent implements Continent {
 		this.continentBuffer = Math.max(0.0F, settings.continentBuffer);
 		this.seed = seed.next();
 
-		// SHAPE UPGRADE: Massively increased warp scale (2.5x) and magnitude (4.0x)
-		// to aggressively distort the underlying coordinate grid, breaking the circular macro-shape.
 		int warpScale = Math.max(8, Math.round(this.maxRadius * 2.5F));
 		this.warp = Domains.domainPerlin(seed.next(), warpScale, 2, this.maxRadius * 4.0F);
-
+		this.detailWarp = Domains.domainPerlin(seed.next(), 24, 2, 18.0F);
 		this.shapeNoise = PresetNoiseData.getNoise(context.noiseLookup, PresetTerrainTypeNoise.GROUND);
 		this.radiusScale = 1.0F;
 	}
 
+	// FIXED: Uses Math.abs to recognize islands in all 4 quadrants
 	public static boolean isIsland(Cell cell) {
-		return cell.continentX >= ISLAND_MARKER && cell.continentZ >= ISLAND_MARKER;
+		return Math.abs(cell.continentX) >= ISLAND_MARKER && Math.abs(cell.continentZ) >= ISLAND_MARKER;
 	}
 
-	private float alphaToEdge(float baseEdge, float alpha) {
+	// FIXED: Simplified logic to force islands to be LAND, not shallow ocean
+	private float alphaToEdge(float baseEdge, float alpha, float steepness) {
 		float shallow = this.controlPoints.shallowOcean;
 		float coast = this.controlPoints.coast;
 		float inland = this.controlPoints.inland;
 
-		// 1. UNDERWATER SLOPE (0% to 30%): Deep to Shallow
-		// Stretches the seabed climb over a massive distance, making it very gentle.
-		if (alpha < 0.3F) {
-			float t = alpha / 0.3F;
+		// Very small transition zones for seabed/beach to ensure max land
+		float waterZoneEnd = 0.05F;
+		float beachZoneEnd = 0.15F;
+
+		if (alpha < waterZoneEnd) {
+			float t = NoiseUtil.clamp(alpha / waterZoneEnd, 0.0F, 1.0F);
+			t = t * t * (3.0F - 2.0F * t);
 			return NoiseUtil.lerp(baseEdge, shallow, t);
 		}
-		// 2. THE COAST BAND (30% to 70%): Shallow to Coast
-		// This forces a massive, artificially flattened plateau around sea level.
-		// It guarantees wide, smooth sandy bays before the terrain is allowed to climb into cliffs.
-		else if (alpha < 0.7F) {
-			float t = (alpha - 0.3F) / 0.4F;
-			t = t * t * (3.0F - 2.0F * t); // Smoothstep for extra flatness
+		else if (alpha < beachZoneEnd) {
+			float t = NoiseUtil.clamp((alpha - waterZoneEnd) / (beachZoneEnd - waterZoneEnd), 0.0F, 1.0F);
+			t = t * t * (3.0F - 2.0F * t);
 			return NoiseUtil.lerp(shallow, coast, t);
 		}
-		// 3. INLAND CLIMB (70% to 100%): Coast to Inland
-		// Only the very center of the island is allowed to reach inland height.
 		else {
-			float t = (alpha - 0.7F) / 0.3F;
+			float t = NoiseUtil.clamp((alpha - beachZoneEnd) / (1.0F - beachZoneEnd), 0.0F, 1.0F);
 			t = t * t * (3.0F - 2.0F * t);
 			return NoiseUtil.lerp(coast, inland, t);
 		}
@@ -112,12 +111,12 @@ public class IslandContinent implements Continent {
 			return;
 		}
 
-		float islandEdge = this.alphaToEdge(cell.continentEdge, sample.alpha);
+		float islandEdge = this.alphaToEdge(cell.continentEdge, sample.alpha, sample.steepness);
 		cell.continentEdge = islandEdge;
 
 		cell.continentId = this.roll(4, sample.gridX, sample.gridZ);
-		cell.continentX = sample.gridX - ISLAND_MARKER;
-		cell.continentZ = sample.gridZ - ISLAND_MARKER;
+		cell.continentX = sample.gridX >= 0 ? sample.gridX + ISLAND_MARKER : sample.gridX - ISLAND_MARKER;
+		cell.continentZ = sample.gridZ >= 0 ? sample.gridZ + ISLAND_MARKER : sample.gridZ - ISLAND_MARKER;
 
 		if (sample.mushroom && islandEdge >= this.controlPoints.coast) {
 			cell.mushroomIsland = true;
@@ -134,7 +133,7 @@ public class IslandContinent implements Continent {
 		if (sample == null || sample.alpha <= 0.0F) {
 			return base;
 		}
-		return this.alphaToEdge(base, sample.alpha);
+		return this.alphaToEdge(base, sample.alpha, sample.steepness);
 	}
 
 	@Override
@@ -147,7 +146,7 @@ public class IslandContinent implements Continent {
 		if (sample == null || sample.alpha <= 0.0F) {
 			return base;
 		}
-		return this.alphaToEdge(base, sample.alpha);
+		return this.alphaToEdge(base, sample.alpha, sample.steepness);
 	}
 
 	@Override
@@ -157,7 +156,7 @@ public class IslandContinent implements Continent {
 
 	@Override
 	public Rivermap getRivermap(int x, int z) {
-		if (x >= ISLAND_MARKER && z >= ISLAND_MARKER) {
+		if (Math.abs(x) >= ISLAND_MARKER && Math.abs(z) >= ISLAND_MARKER) {
 			return EMPTY_RIVERMAP;
 		}
 		return this.delegate.getRivermap(x, z);
@@ -166,6 +165,8 @@ public class IslandContinent implements Continent {
 	private IslandSample sample(float x, float z) {
 		float wx = this.warp.getX(x, z, 0);
 		float wz = this.warp.getZ(x, z, 0);
+		float dwx = this.detailWarp.getX(wx, wz, 0);
+		float dwz = this.detailWarp.getZ(wx, wz, 0);
 		float px = wx * this.frequency;
 		float pz = wz * this.frequency;
 		int xr = NoiseUtil.floor(px);
@@ -173,46 +174,41 @@ public class IslandContinent implements Continent {
 
 		float totalAlpha = 0.0F;
 		float maxSingleAlpha = 0.0F;
-
+		float bestSteepness = 0.0F;
 		boolean isMushroom = false;
 		int bestGridX = xr;
 		int bestGridZ = zr;
 		boolean found = false;
 
-		// Maintained large search radius to account for the gentler, wider island spans
-		int searchRadius = Math.max(3, (int) Math.ceil(this.maxRadius * 9.0F * this.frequency));
+		float maxPossibleRadius = (this.maxRadius * 6.5F * 2.0F) + (this.maxRadius * 4.0F);
+		int searchRadius = Math.max(6, (int) Math.ceil(maxPossibleRadius * this.frequency) + 2);
 
 		for (int dz = -searchRadius; dz <= searchRadius; ++dz) {
 			for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
 				int cx = xr + dx;
 				int cz = zr + dz;
 
-				if (this.roll(1, cx, cz) > this.chance) {
-					continue;
-				}
+				if (this.roll(1, cx, cz) > this.chance) continue;
 
 				Vec2f cell = NoiseUtil.cell(this.seed, cx, cz);
 				float cxf = cx + cell.x() * this.jitter;
 				float czf = cz + cell.y() * this.jitter;
-
 				float worldX = cxf / this.frequency;
 				float worldZ = czf / this.frequency;
 
 				float continentEdgeAtCenter = this.delegate.getEdgeValue(worldX, worldZ);
-				float bufferStart = this.controlPoints.shallowOcean - this.continentBuffer;
-				if (continentEdgeAtCenter >= bufferStart) {
-					continue;
-				}
+				if (continentEdgeAtCenter >= this.controlPoints.shallowOcean - this.continentBuffer) continue;
 
 				float baseRadius = NoiseUtil.lerp(this.minRadius, this.maxRadius, this.roll(2, cx, cz)) * this.radiusScale;
+				float nx = dwx * 0.0015F;
+				float nz = dwz * 0.0015F;
 
-				// BAY SMOOTHING FIX: Lowered frequencies and removed the 3rd micro-octave entirely
-				// to eliminate the weird pointy spikes and enforce wide, sweeping bays.
-				float nx = wx * 0.0015F;
-				float nz = wz * 0.0015F;
-
-				float nVal0 = this.shapeNoise.compute(nx, nz, this.seed + 99);        // Macro (Base Structure)
-				float nVal1 = this.shapeNoise.compute(nx * 2.5F, nz * 2.5F, this.seed + 100); // Mid (Bays/Inlets)
+				float nVal0 = this.shapeNoise.compute(nx, nz, this.seed + 99);
+				float nVal1 = this.shapeNoise.compute(nx * 2.5F, nz * 2.5F, this.seed + 100);
+				float nVal2 = this.shapeNoise.compute(nx * 6.0F, nz * 6.0F, this.seed + 101);
+				float nVal3 = this.shapeNoise.compute(dwx * 0.030F, dwz * 0.030F, this.seed + 102);
+				float nValRipple = this.shapeNoise.compute(dwx * 0.0833F, dwz * 0.0833F, this.seed + 103);
+				float nValMod = this.shapeNoise.compute(nx * 4.0F, nz * 4.0F, this.seed + 104);
 
 				float nMin = this.shapeNoise.minValue();
 				float nMax = this.shapeNoise.maxValue();
@@ -220,24 +216,27 @@ public class IslandContinent implements Continent {
 
 				float norm0 = range != 0 ? (nVal0 - nMin) / range : 0.5F;
 				float norm1 = range != 0 ? (nVal1 - nMin) / range : 0.5F;
+				float norm2 = range != 0 ? (nVal2 - nMin) / range : 0.5F;
+				float norm3 = range != 0 ? (nVal3 - nMin) / range : 0.5F;
+				float normRipple = range != 0 ? (nValRipple - nMin) / range : 0.5F;
+				float normMod = range != 0 ? (nValMod - nMin) / range : 0.5F;
 
-				float combinedNoise = (norm0 * 0.70F) + (norm1 * 0.30F);
-				float shapeModifier = 0.5F + (combinedNoise * 1.5F);
+				float steepness = NoiseUtil.clamp((norm0 * 0.60F + norm1 * 0.40F), 0.0F, 1.0F);
+				float coastalWeight = 0.05F + (steepness * 0.17F);
+				float combinedNoise = (norm0 * 0.55F) + (norm1 * 0.35F) + ((norm2 - 0.5F) * coastalWeight);
 
-				float totalRadius = baseRadius * 6.5F * shapeModifier;
+				float totalRadius = baseRadius * 6.5F * (0.5F + (NoiseUtil.clamp(combinedNoise, 0.0F, 1.0F) * 1.5F));
+				float dist = NoiseUtil.sqrt(NoiseUtil.dist2(worldX, worldZ, dwx, dwz));
+				if (dist >= totalRadius) continue;
 
-				float dist = NoiseUtil.sqrt(NoiseUtil.dist2(worldX, worldZ, wx, wz));
-				if (dist >= totalRadius) {
-					continue;
-				}
-
-				float normDist = dist / totalRadius;
-				float alpha = 1.0F - normDist;
+				float baseAlpha = (1.0F - (dist / totalRadius));
+				baseAlpha = baseAlpha * baseAlpha * (3.0F - 2.0F * baseAlpha);
+				float alpha = NoiseUtil.clamp(baseAlpha + ((norm3 - 0.5F) * 0.035F * baseAlpha) + ((normRipple - 0.5F) * (0.005F + (normMod * 0.050F)) * baseAlpha), 0.0F, 1.0F);
 
 				totalAlpha += alpha;
-
 				if (alpha > maxSingleAlpha) {
 					maxSingleAlpha = alpha;
+					bestSteepness = steepness;
 					bestGridX = cx;
 					bestGridZ = cz;
 					isMushroom = this.roll(3, cx, cz) < this.rareBiomeChance;
@@ -246,30 +245,19 @@ public class IslandContinent implements Continent {
 			}
 		}
 
-		if (!found || totalAlpha <= 0.0F) {
-			return null;
-		}
-
-		totalAlpha = Math.min(1.0F, totalAlpha);
-
-		return new IslandSample(totalAlpha, isMushroom, bestGridX, bestGridZ);
+		return !found || totalAlpha <= 0.0F ? null : new IslandSample(Math.min(1.0F, totalAlpha), bestSteepness, isMushroom, bestGridX, bestGridZ);
 	}
 
 	private float roll(int offset, int gridX, int gridZ) {
-		float value = NoiseUtil.valCoord2D(this.seed + offset, gridX, gridZ);
-		return NoiseUtil.map(value, -1.0F, 1.0F, 2.0F);
+		return NoiseUtil.map(NoiseUtil.valCoord2D(this.seed + offset, gridX, gridZ), -1.0F, 1.0F, 2.0F);
 	}
 
 	private static final class IslandSample {
-		final float alpha;
+		final float alpha, steepness;
 		final boolean mushroom;
-		final int gridX;
-		final int gridZ;
-		IslandSample(float alpha, boolean mushroom, int gridX, int gridZ) {
-			this.alpha = alpha;
-			this.mushroom = mushroom;
-			this.gridX = gridX;
-			this.gridZ = gridZ;
+		final int gridX, gridZ;
+		IslandSample(float alpha, float steepness, boolean mushroom, int gridX, int gridZ) {
+			this.alpha = alpha; this.steepness = steepness; this.mushroom = mushroom; this.gridX = gridX; this.gridZ = gridZ;
 		}
 	}
 }
