@@ -70,17 +70,26 @@ public class IslandContinent implements Continent {
 		return Math.abs(cell.continentX) >= ISLAND_MARKER && Math.abs(cell.continentZ) >= ISLAND_MARKER;
 	}
 
-	private float alphaToEdge(float baseEdge, float alpha, float steepness) {
+	private float alphaToEdge(float baseEdge, float alpha, float steepness, float sizeFactor) {
 		float shallow = this.controlPoints.shallowOcean;
 		float coast = this.controlPoints.coast;
 		float inland = this.controlPoints.inland;
 
-		// Smooth proportional horizontal zones (alpha from 0.0 to 1.0)
-		float shallowEnd = 0.35F;
-		float coastEnd = 0.60F;
+		float coastVal = this.controlPoints.islandCoast;
+		float inlandVal = this.controlPoints.islandInland;
 
-		// Compress the beach transition where steepness is high to form cliffs
-		float actualCoastEnd = NoiseUtil.lerp(coastEnd, shallowEnd + 0.05F, NoiseUtil.clamp(steepness, 0.0F, 1.0F));
+		// 1. Smoothly scale peak height based on the distance between islandCoast and islandInland sliders
+		float heightProgress = NoiseUtil.clamp((inlandVal - coastVal) / Math.max(0.001F, 1.0F - coastVal), 0.0F, 1.0F);
+		float effectiveHeight = heightProgress * sizeFactor;
+		float targetPeak = NoiseUtil.lerp(coast, inland, effectiveHeight);
+
+		// 2. Wide, smooth transition zones to completely eliminate vertical cliff walls
+		float shallowEnd = 0.30F;
+		float coastEnd = NoiseUtil.lerp(0.65F, 0.45F, NoiseUtil.clamp(inlandVal, 0.0F, 1.0F));
+
+		// Ensure the slope width is never crushed into a sharp vertical drop
+		coastEnd = Math.max(shallowEnd + 0.18F, coastEnd);
+		float actualCoastEnd = NoiseUtil.lerp(coastEnd, shallowEnd + 0.12F, NoiseUtil.clamp(steepness * 0.4F, 0.0F, 1.0F));
 
 		if (alpha < shallowEnd) {
 			float t = shallowEnd > 0.0F ? NoiseUtil.clamp(alpha / shallowEnd, 0.0F, 1.0F) : 1.0F;
@@ -97,7 +106,7 @@ public class IslandContinent implements Continent {
 			float width = 1.0F - actualCoastEnd;
 			float t = width > 0.0F ? NoiseUtil.clamp((alpha - actualCoastEnd) / width, 0.0F, 1.0F) : 1.0F;
 			t = t * t * (3.0F - 2.0F * t);
-			return NoiseUtil.lerp(coast, inland, t);
+			return NoiseUtil.lerp(coast, targetPeak, t);
 		}
 	}
 
@@ -118,8 +127,16 @@ public class IslandContinent implements Continent {
 			return;
 		}
 
-		float islandEdge = this.alphaToEdge(cell.continentEdge, sample.alpha, sample.steepness);
+		float islandEdge = this.alphaToEdge(cell.continentEdge, sample.alpha, sample.steepness, sample.sizeFactor);
 		cell.continentEdge = NoiseUtil.lerp(cell.continentEdge, islandEdge, bufferMul);
+
+		cell.continentId = this.roll(4, sample.gridX, sample.gridZ);
+		cell.continentX = sample.gridX >= 0 ? sample.gridX + ISLAND_MARKER : sample.gridX - ISLAND_MARKER;
+		cell.continentZ = sample.gridZ >= 0 ? sample.gridZ + ISLAND_MARKER : sample.gridZ - ISLAND_MARKER;
+
+		if (sample.mushroom && islandEdge >= this.controlPoints.coast) {
+			cell.mushroomIsland = true;
+		}
 	}
 
 	@Override
@@ -136,7 +153,7 @@ public class IslandContinent implements Continent {
 		if (bufferMul <= 0.0F) {
 			return base;
 		}
-		float islandEdge = this.alphaToEdge(base, sample.alpha, sample.steepness);
+		float islandEdge = this.alphaToEdge(base, sample.alpha, sample.steepness, sample.sizeFactor);
 		return NoiseUtil.lerp(base, islandEdge, bufferMul);
 	}
 
@@ -154,7 +171,7 @@ public class IslandContinent implements Continent {
 		if (bufferMul <= 0.0F) {
 			return base;
 		}
-		float islandEdge = this.alphaToEdge(base, sample.alpha, sample.steepness);
+		float islandEdge = this.alphaToEdge(base, sample.alpha, sample.steepness, sample.sizeFactor);
 		return NoiseUtil.lerp(base, islandEdge, bufferMul);
 	}
 
@@ -183,6 +200,7 @@ public class IslandContinent implements Continent {
 
 		float maxSingleAlpha = 0.0F;
 		float bestSteepness = 0.0F;
+		float bestSizeFactor = 0.5F;
 		boolean isMushroom = false;
 		int bestGridX = xr;
 		int bestGridZ = zr;
@@ -217,6 +235,8 @@ public class IslandContinent implements Continent {
 				}
 
 				float baseRadius = NoiseUtil.lerp(this.minRadius, this.maxRadius, this.roll(2, cx, cz)) * this.radiusScale;
+				float sizeFactor = NoiseUtil.clamp((baseRadius - this.minRadius) / Math.max(1.0F, this.maxRadius - this.minRadius), 0.2F, 1.0F);
+
 				float nx = dwx * 0.0015F;
 				float nz = dwz * 0.0015F;
 
@@ -269,6 +289,7 @@ public class IslandContinent implements Continent {
 				if (alpha > maxSingleAlpha) {
 					maxSingleAlpha = alpha;
 					bestSteepness = steepness;
+					bestSizeFactor = sizeFactor;
 					bestGridX = cx;
 					bestGridZ = cz;
 					isMushroom = this.roll(3, cx, cz) < this.rareBiomeChance;
@@ -277,7 +298,7 @@ public class IslandContinent implements Continent {
 			}
 		}
 
-		return !found || maxSingleAlpha <= 0.0F ? null : new IslandSample(Math.min(1.0F, maxSingleAlpha), bestSteepness, isMushroom, bestGridX, bestGridZ);
+		return !found || maxSingleAlpha <= 0.0F ? null : new IslandSample(Math.min(1.0F, maxSingleAlpha), bestSteepness, bestSizeFactor, isMushroom, bestGridX, bestGridZ);
 	}
 
 	private float roll(int offset, int gridX, int gridZ) {
@@ -298,11 +319,11 @@ public class IslandContinent implements Continent {
 	}
 
 	private static final class IslandSample {
-		final float alpha, steepness;
+		final float alpha, steepness, sizeFactor;
 		final boolean mushroom;
 		final int gridX, gridZ;
-		IslandSample(float alpha, float steepness, boolean mushroom, int gridX, int gridZ) {
-			this.alpha = alpha; this.steepness = steepness; this.mushroom = mushroom; this.gridX = gridX; this.gridZ = gridZ;
+		IslandSample(float alpha, float steepness, float sizeFactor, boolean mushroom, int gridX, int gridZ) {
+			this.alpha = alpha; this.steepness = steepness; this.sizeFactor = sizeFactor; this.mushroom = mushroom; this.gridX = gridX; this.gridZ = gridZ;
 		}
 	}
 }
