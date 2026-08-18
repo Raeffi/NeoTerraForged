@@ -46,6 +46,12 @@ public record Heightmap(CellPopulator terrain, CellPopulator region, Continent c
         cell.beachNoise = this.beachNoise.compute(x, z, 0);
         this.continent.apply(cell, x, z);
         this.region.apply(cell, x, z);
+<<<<<<< Updated upstream
+=======
+        // islands only override continentEdge (plus continentX/Z and mushroomIsland);
+        // this shared terrain populator gives them the same coast steepness and terrain
+        // variety as the mainland continents
+>>>>>>> Stashed changes
         this.terrain.apply(cell, x * this.terrainFrequency, z * this.terrainFrequency);
 	}
 	

@@ -117,6 +117,7 @@ public class WorldSettingsPage extends PresetEditorPage {
 		
 		this.applyContinentType(this.continentType.getValue());
 
+<<<<<<< Updated upstream
 		this.islandInland = PresetWidgets.createFloatSlider(controlPoints.islandInland, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_ISLAND_INLAND, (slider, value) -> {
 			value = Math.min(value, this.islandCoast.getValue());
 			controlPoints.islandInland = (float) slider.scaleValue(value);
@@ -135,6 +136,40 @@ public class WorldSettingsPage extends PresetEditorPage {
 			this.regenerate();
 			return value;
 		});
+=======
+		this.islandChance = PresetWidgets.createFloatSlider(
+				world.islands.chance,
+				0.0F,
+				1.0F,
+				RTFTranslationKeys.GUI_SLIDER_ISLAND_CHANCE,  // Translation key
+				(slider, value) -> {
+					world.islands.chance = (float) slider.scaleValue(value);
+					this.regenerate();
+					return value;
+				}
+		);
+        this.islandInland = PresetWidgets.createFloatSlider(controlPoints.islandInland, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_ISLAND_INLAND, (slider, value) -> {
+            controlPoints.islandInland = (float) slider.scaleValue(value);
+            this.regenerate();
+            return value;
+        });
+        this.islandCoast = PresetWidgets.createFloatSlider(controlPoints.islandCoast, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_ISLAND_COAST, (slider, value) -> {
+            controlPoints.islandCoast = (float) slider.scaleValue(value);
+            this.regenerate();
+            return value;
+        });
+		this.islandContinentBuffer = PresetWidgets.createFloatSlider(world.islands.continentBuffer, 0.0F, 0.5F, RTFTranslationKeys.GUI_SLIDER_ISLAND_CONTINENT_BUFFER, (slider, value) -> {
+			world.islands.continentBuffer = (float) slider.scaleValue(value);
+			this.regenerate();
+			return value;
+		});
+        this.deepOcean = PresetWidgets.createFloatSlider(controlPoints.deepOcean, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_DEEP_OCEAN, (slider, value) -> {
+            value = Mth.clamp(value, 0.0F, 1.0F);
+            controlPoints.deepOcean = (float) slider.scaleValue(value);
+            this.regenerate();
+            return value;
+        });
+>>>>>>> Stashed changes
 		this.shallowOcean = PresetWidgets.createFloatSlider(controlPoints.shallowOcean, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_SHALLOW_OCEAN, (slider, value) -> {
 			value = Mth.clamp(value, this.deepOcean.getValue(), this.beach.getValue());
 			controlPoints.shallowOcean = (float) slider.scaleValue(value);

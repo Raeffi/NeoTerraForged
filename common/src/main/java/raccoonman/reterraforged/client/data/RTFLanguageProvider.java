@@ -234,9 +234,8 @@ public final class RTFLanguageProvider {
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_CONTINENT_NOISE_OCTAVES), "The number of octaves of noise used to distort the continent.");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_CONTINENT_NOISE_GAIN), "The contribution strength of each noise octave.");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_CONTINENT_NOISE_LACUNARITY), "The frequency multiplier for each noise octave.");
-			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_INLAND), "Controls the point below which island coasts transition into island. The greater the gap to the island coasts slider, the more gradual the transition.");
-			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_COAST), "Controls the point below which deep oceans transition into island coasts. The greater the gap to the deep ocean slider, the more gradual the transition.");
-			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_DEEP_OCEAN), "Controls the point above which deep oceans transition into shallow oceans. The greater the gap to the shallow ocean slider, the more gradual the transition.");
+            this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_INLAND), "Controls how much of each island is inland terrain, rather than coast.");
+            this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_COAST), "Controls the overall size of islands.");			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_DEEP_OCEAN), "Controls the point above which deep oceans transition into shallow oceans. The greater the gap to the shallow ocean slider, the more gradual the transition.");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_SHALLOW_OCEAN), "Controls the point above which shallow oceans transition into coastal terrain. The greater the gap to the coast slider, the more gradual the transition.");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_BEACH), "Controls how much of the coastal terrain is assigned to beach biomes.");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_COAST), "Controls the size of coastal regions and is also the point below which inland terrain transitions into oceans.");
