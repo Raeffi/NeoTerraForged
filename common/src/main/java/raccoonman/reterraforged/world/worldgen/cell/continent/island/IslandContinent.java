@@ -1,7 +1,5 @@
 package raccoonman.reterraforged.world.worldgen.cell.continent.island;
 
-import raccoonman.reterraforged.data.worldgen.preset.PresetNoiseData;
-import raccoonman.reterraforged.data.worldgen.preset.PresetTerrainTypeNoise;
 import raccoonman.reterraforged.data.worldgen.preset.settings.WorldSettings;
 import raccoonman.reterraforged.world.worldgen.GeneratorContext;
 import raccoonman.reterraforged.world.worldgen.cell.Cell;
@@ -13,125 +11,137 @@ import raccoonman.reterraforged.world.worldgen.noise.NoiseUtil;
 import raccoonman.reterraforged.world.worldgen.noise.NoiseUtil.Vec2f;
 import raccoonman.reterraforged.world.worldgen.noise.domain.Domain;
 import raccoonman.reterraforged.world.worldgen.noise.domain.Domains;
-import raccoonman.reterraforged.world.worldgen.noise.module.Noise;
 import raccoonman.reterraforged.world.worldgen.util.Seed;
 
+/**
+ * Wraps an existing {@link Continent} and scatters small islands into the
+ * open ocean the wrapped continent reports.
+ *
+ * An island is only ever considered for a cell where the mainland itself
+ * reports deep ocean, and an island's footprint is discarded up front (at
+ * the grid-cell level) if its centre falls within {@code continentBuffer}
+ * of the mainland coastline. This buffer check is the ONLY point where an
+ * island's existence depends on the mainland - once an island is allowed to
+ * exist, its shape is generated entirely on its own terms and never blends
+ * against the mainland's own (possibly irregularly warped) edge value, so
+ * there is no seam where an island's falloff band happens to meet a patch
+ * of mainland ocean.
+ *
+ * An island only ever overrides {@code continentEdge} (plus continentX/Z
+ * and mushroomIsland). The value it writes spans the SAME deepOcean -> 1.0
+ * range the mainland uses, so the shared terrain populator in
+ * {@link raccoonman.reterraforged.world.worldgen.cell.heightmap.Heightmap}
+ * gives islands a real shallow-ocean ring, a beach band, and the same range
+ * of terrain (hills, mountains, and so on) as the active continent - islands
+ * read as small versions of it. Islands never carry rivers or lakes, see
+ * {@link #getRivermap(int, int)}.
+ *
+ * Beyond an island's core radius, its edge value blends smoothly toward a
+ * flat open-ocean plateau over a soft falloff band, so there is no hard
+ * step at the island boundary. Where two islands' radii (plus their falloff
+ * bands) overlap, all candidate grid points near a sample position are
+ * evaluated and the highest edge value wins, so overlapping islands merge
+ * into one landmass instead of cutting off at a hard line.
+ *
+ * The island's outline itself is shaped by five octaves of position
+ * distortion at different scales (see {@link #shapeWarp}), from a large,
+ * strong pass that can split an island into separate lobes down to a small,
+ * weak pass that roughens the coastline, so islands read as organic
+ * branching shapes rather than circles.
+ */
 public class IslandContinent implements Continent {
+	// Any continentX/continentZ at or above this is island space, never a real continent coordinate.
 	private static final int ISLAND_MARKER = 1 << 28;
 	private static final Rivermap EMPTY_RIVERMAP = new Rivermap(0, 0, new Network[0], GenWarp.EMPTY);
+	// how far past an island's own radius the soft blend into open ocean continues, as a multiple of that radius
+	private static final float FALLOFF_SCALE = 1.35F;
+	// flat edge value islands blend toward past their falloff band - a plateau, not the mainland's own value
+	private static final float OPEN_OCEAN_EDGE = 0.0F;
 
 	private final Continent delegate;
 	private final boolean enabled;
 	private final int seed;
 	private final float frequency;
 	private final float jitter;
-	private float minRadius = 32.0f;
-	private float maxRadius = 256.0f;
-	private final WorldSettings.ControlPoints controlPoints;
-
+	private final float minRadius;
+	private final float maxRadius;
 	private final float chance;
 	private final float rareBiomeChance;
 	private final float continentBuffer;
-	private final float radiusScale;
-
+	private final float inlandFraction;
+	private final float oceanThreshold;
+	private final WorldSettings.ControlPoints controlPoints;
 	private final Domain warp;
-	private final Domain detailWarp;
-	private final Noise shapeNoise;
+	private final Domain shapeWarp;
 
 	public IslandContinent(Continent delegate, Seed seed, GeneratorContext context) {
 		this.delegate = delegate;
 		WorldSettings.Islands settings = context.preset.world().islands;
-		this.enabled = settings.enabled;
 		this.controlPoints = context.preset.world().controlPoints;
+		this.enabled = settings.enabled;
 		this.frequency = 1.0F / Math.max(1, settings.spacing);
 		this.jitter = settings.jitter;
-		this.minRadius = Math.max(8.0F, settings.minRadius);
-
-		float coastWeight = NoiseUtil.clamp(this.controlPoints.islandCoast, 0.0F, 1.0F);
-		float oceanWeight = NoiseUtil.clamp(this.controlPoints.deepOcean, 0.0F, 1.0F);
-		float deepOceanWeight = Math.max(0.001F, oceanWeight);
-		float coastNormalized = NoiseUtil.clamp(coastWeight / deepOceanWeight, 0.0F, 1.0F);
-		float radiusRange = 256.0F - this.minRadius;
-
-		this.maxRadius = this.minRadius + radiusRange * coastNormalized;
 		this.chance = NoiseUtil.clamp(settings.chance, 0.0F, 1.0F);
 		this.rareBiomeChance = NoiseUtil.clamp(settings.rareBiomeChance, 0.0F, 1.0F);
 		this.continentBuffer = Math.max(0.0F, settings.continentBuffer);
+		this.oceanThreshold = this.controlPoints.deepOcean;
 		this.seed = seed.next();
 
-		int warpScale = Math.max(8, Math.round(this.maxRadius * 2.5F));
-		this.warp = Domains.domainPerlin(seed.next(), warpScale, 2, this.maxRadius * 4.0F);
-		this.detailWarp = Domains.domainPerlin(seed.next(), 24, 2, 18.0F);
-		this.shapeNoise = PresetNoiseData.getNoise(context.noiseLookup, PresetTerrainTypeNoise.GROUND);
-		this.radiusScale = 1.0F;
-	}
+		// islandCoast (0-1) sets overall island size. At 0, islands cap out at the
+		// preset's configured maxRadius; at 1 they can grow until they'd start
+		// touching a neighbouring grid cell's island (half the grid spacing)
+		this.minRadius = Math.max(8.0F, settings.minRadius);
+		float configuredMax = Math.max(this.minRadius, settings.maxRadius);
+		float spacingCap = Math.max(configuredMax, settings.spacing * 0.5F);
+		float sizeFraction = NoiseUtil.clamp(this.controlPoints.islandCoast, 0.0F, 1.0F);
+		this.maxRadius = NoiseUtil.lerp(configuredMax, spacingCap, sizeFraction);
 
-	// FIXED: Uses Math.abs to recognize islands in all 4 quadrants
-	public static boolean isIsland(Cell cell) {
-		return Math.abs(cell.continentX) >= ISLAND_MARKER && Math.abs(cell.continentZ) >= ISLAND_MARKER;
-	}
+		// islandInland sets how much of that radius reads as inland core versus coastal fringe
+		this.inlandFraction = NoiseUtil.clamp(this.controlPoints.islandInland, 0.0F, 1.0F);
 
-	private float alphaToEdge(float baseEdge, float alpha, float steepness) {
-		float shallow = this.controlPoints.shallowOcean;
-		float coast = this.controlPoints.coast;
-		float inland = this.controlPoints.inland;
+		// macro warp: distorts the sample point before the grid search, so
+		// islands scatter at irregular offsets from their grid points
+		int warpScale = Math.max(8, Math.round(this.maxRadius * 0.6F));
+		this.warp = Domains.domainPerlin(seed.next(), warpScale, 2, this.maxRadius * 0.3F);
 
-		// zone widths are fixed fractions of alpha, so they scale with the
-		// island's own radius instead of shrinking to a fixed distance -
-		// this keeps the underwater slope equally gradual on small and big islands
-		float waterZoneEnd = 0.35F;
-		// cliffs only appear where steepness is high (inland pushing straight into
-		// the ocean); everywhere else the beach zone stays wide and gradual
-		float beachZoneWidth = NoiseUtil.lerp(0.45F, 0.05F, NoiseUtil.clamp(steepness, 0.0F, 1.0F));
-		float beachZoneEnd = waterZoneEnd + beachZoneWidth;
-
-		if (alpha < waterZoneEnd) {
-			float t = NoiseUtil.clamp(alpha / waterZoneEnd, 0.0F, 1.0F);
-			t = t * t * (3.0F - 2.0F * t);
-			return NoiseUtil.lerp(baseEdge, shallow, t);
-		}
-		else if (alpha < beachZoneEnd) {
-			float t = NoiseUtil.clamp((alpha - waterZoneEnd) / (beachZoneEnd - waterZoneEnd), 0.0F, 1.0F);
-			t = t * t * (3.0F - 2.0F * t);
-			return NoiseUtil.lerp(shallow, coast, t);
-		}
-		else {
-			float t = NoiseUtil.clamp((alpha - beachZoneEnd) / (1.0F - beachZoneEnd), 0.0F, 1.0F);
-			t = t * t * (3.0F - 2.0F * t);
-			return NoiseUtil.lerp(coast, inland, t);
-		}
+		// shape warp: FIVE octaves of position distortion stacked together, from
+		// an extra-large/strong pass (can split an island into separate lobes,
+		// producing the branching multi-lobed shapes seen on real coastlines)
+		// down to an extra-small/weak pass (fine coastline roughness). A single
+		// octave only ever wobbles a circle; the range of scales is what
+		// produces organic shapes instead.
+		float avgRadius = (this.minRadius + this.maxRadius) * 0.5F;
+		int extraLargeScale = Math.max(10, Math.round(avgRadius * 1.8F));
+		int largeScale = Math.max(8, Math.round(avgRadius * 0.9F));
+		int mediumScale = Math.max(6, Math.round(avgRadius * 0.4F));
+		int smallScale = Math.max(4, Math.round(avgRadius * 0.15F));
+		int extraSmallScale = Math.max(2, Math.round(avgRadius * 0.06F));
+		Domain shapeWarp = Domains.domainPerlin(seed.next(), extraLargeScale, 2, avgRadius * 0.7F);
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), largeScale, 2, avgRadius * 0.45F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), mediumScale, 2, avgRadius * 0.25F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), smallScale, 1, avgRadius * 0.12F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), extraSmallScale, 1, avgRadius * 0.04F));
+		this.shapeWarp = shapeWarp;
 	}
 
 	@Override
 	public void apply(Cell cell, float x, float z) {
 		this.delegate.apply(cell, x, z);
-
-		if (!this.enabled || cell.continentEdge >= this.controlPoints.shallowOcean) {
+		if (!this.enabled || cell.continentEdge >= this.oceanThreshold) {
 			return;
 		}
-
 		IslandSample sample = this.sample(x, z);
-		if (sample == null || sample.alpha <= 0.0F) {
+		if (sample == null) {
 			return;
 		}
-
-		// fade the island out as the actual queried point nears the continent,
-		// not just as the island's own centre does - otherwise a large island's
-		// far edge can still reach the continent even when its centre passes
-		float pointBufferMul = this.pointBufferMultiplier(cell.continentEdge);
-		float alpha = sample.alpha * pointBufferMul;
-		if (alpha <= 0.0F) {
-			return;
-		}
-
-		float islandEdge = this.alphaToEdge(cell.continentEdge, alpha, sample.steepness);
-		cell.continentEdge = islandEdge;
-
+		cell.continentEdge = sample.edge;
 		cell.continentId = this.roll(4, sample.gridX, sample.gridZ);
-		cell.continentX = sample.gridX >= 0 ? sample.gridX + ISLAND_MARKER : sample.gridX - ISLAND_MARKER;
-		cell.continentZ = sample.gridZ >= 0 ? sample.gridZ + ISLAND_MARKER : sample.gridZ - ISLAND_MARKER;
-
-		if (sample.mushroom && islandEdge >= this.controlPoints.coast) {
+		// use the absolute grid index so the marker stays intact in the
+		// negative half of the world too, otherwise getRivermap below would
+		// miss the cell and let mainland rivers cut into the island
+		cell.continentX = ISLAND_MARKER + Math.abs(sample.gridX);
+		cell.continentZ = ISLAND_MARKER + Math.abs(sample.gridZ);
+		if (sample.mushroom) {
 			cell.mushroomIsland = true;
 		}
 	}
@@ -139,194 +149,181 @@ public class IslandContinent implements Continent {
 	@Override
 	public float getEdgeValue(float x, float z) {
 		float base = this.delegate.getEdgeValue(x, z);
-		if (!this.enabled || base >= this.controlPoints.shallowOcean) {
+		if (!this.enabled || base >= this.oceanThreshold) {
 			return base;
 		}
 		IslandSample sample = this.sample(x, z);
-		if (sample == null || sample.alpha <= 0.0F) {
-			return base;
-		}
-		float alpha = sample.alpha * this.pointBufferMultiplier(base);
-		if (alpha <= 0.0F) {
-			return base;
-		}
-		return this.alphaToEdge(base, alpha, sample.steepness);
+		return sample != null ? sample.edge : base;
 	}
 
 	@Override
 	public float getLandValue(float x, float z) {
 		float base = this.delegate.getLandValue(x, z);
-		if (!this.enabled || base >= this.controlPoints.shallowOcean) {
+		if (!this.enabled || base >= this.oceanThreshold) {
 			return base;
 		}
 		IslandSample sample = this.sample(x, z);
-		if (sample == null || sample.alpha <= 0.0F) {
-			return base;
-		}
-		float alpha = sample.alpha * this.pointBufferMultiplier(base);
-		if (alpha <= 0.0F) {
-			return base;
-		}
-		return this.alphaToEdge(base, alpha, sample.steepness);
+		return sample != null ? sample.edge : base;
 	}
 
 	@Override
 	public long getNearestCenter(float x, float z) {
+		// spawn search and similar callers should still resolve to a real continent, not a remote island
 		return this.delegate.getNearestCenter(x, z);
 	}
 
 	@Override
 	public Rivermap getRivermap(int x, int z) {
-		if (Math.abs(x) >= ISLAND_MARKER && Math.abs(z) >= ISLAND_MARKER) {
+		if (x >= ISLAND_MARKER && z >= ISLAND_MARKER) {
 			return EMPTY_RIVERMAP;
 		}
 		return this.delegate.getRivermap(x, z);
 	}
 
+	/**
+	 * Checks every island grid point near (x, z), including neighbours whose
+	 * radius plus falloff band could still reach this position. Returns the
+	 * highest edge value found, so overlapping islands merge instead of
+	 * cutting off at whichever grid point is nearest. Returns null if no
+	 * island reaches this position at all, meaning the mainland's own value
+	 * applies unchanged. Deliberately never reads the mainland's edge value
+	 * except for the one-time per-grid-point buffer check below - the shape
+	 * itself is fully self-contained, so there is no seam against the
+	 * mainland's own (possibly irregular) coastline.
+	 */
 	private IslandSample sample(float x, float z) {
 		float wx = this.warp.getX(x, z, 0);
 		float wz = this.warp.getZ(x, z, 0);
-		float dwx = this.detailWarp.getX(wx, wz, 0);
-		float dwz = this.detailWarp.getZ(wx, wz, 0);
 		float px = wx * this.frequency;
 		float pz = wz * this.frequency;
 		int xr = NoiseUtil.floor(px);
 		int zr = NoiseUtil.floor(pz);
 
-		float totalAlpha = 0.0F;
-		float maxSingleAlpha = 0.0F;
-		float bestSteepness = 0.0F;
-		boolean isMushroom = false;
-		int bestGridX = xr;
-		int bestGridZ = zr;
-		boolean found = false;
+		float sx = this.shapeWarp.getX(x, z, 0);
+		float sz = this.shapeWarp.getZ(x, z, 0);
 
-		float maxPossibleRadius = (this.maxRadius * 6.5F * 2.5F) + (this.maxRadius * 4.0F);
-		int searchRadius = Math.max(6, (int) Math.ceil(maxPossibleRadius * this.frequency) + 2);
+		float bestEdge = OPEN_OCEAN_EDGE;
+		int bestGridX = 0;
+		int bestGridZ = 0;
+		boolean placed = false;
 
-		for (int dz = -searchRadius; dz <= searchRadius; ++dz) {
-			for (int dx = -searchRadius; dx <= searchRadius; ++dx) {
-				int cx = xr + dx;
-				int cz = zr + dz;
+		for (int dz = -1; dz <= 1; ++dz) {
+			for (int dx = -1; dx <= 1; ++dx) {
+				int gx = xr + dx;
+				int gz = zr + dz;
 
-				if (this.roll(1, cx, cz) > this.chance) continue;
+				if (this.roll(1, gx, gz) > this.chance) {
+					// this grid point rolled "no island"
+					continue;
+				}
 
-				Vec2f cell = NoiseUtil.cell(this.seed, cx, cz);
-				float cxf = cx + cell.x() * this.jitter;
-				float czf = cz + cell.y() * this.jitter;
+				Vec2f offset = NoiseUtil.cell(this.seed, gx, gz);
+				float cxf = gx + offset.x() * this.jitter;
+				float czf = gz + offset.y() * this.jitter;
 				float worldX = cxf / this.frequency;
 				float worldZ = czf / this.frequency;
 
+				// one-time grid-cell level exclusion: reject island footprints too
+				// close to the mainland before doing any per-block shape work -
+				// this is the only place the mainland's shape can prevent an
+				// island from existing at all
 				float continentEdgeAtCenter = this.delegate.getEdgeValue(worldX, worldZ);
-				float bufferStart = this.controlPoints.shallowOcean - this.continentBuffer;
-				float bufferEnd = this.controlPoints.shallowOcean;
-				if (continentEdgeAtCenter >= bufferEnd) continue;
-
-				// scale the island smoothly to zero across the buffer band instead of
-				// admitting or rejecting it outright at one threshold
-				float bufferMul = 1.0F;
-				if (this.continentBuffer > 0.0F && continentEdgeAtCenter > bufferStart) {
-					float t = NoiseUtil.clamp((continentEdgeAtCenter - bufferStart) / this.continentBuffer, 0.0F, 1.0F);
-					t = t * t * (3.0F - 2.0F * t);
-					bufferMul = 1.0F - t;
+				if (continentEdgeAtCenter >= this.controlPoints.shallowOcean - this.continentBuffer) {
+					continue;
 				}
 
-				float baseRadius = NoiseUtil.lerp(this.minRadius, this.maxRadius, this.roll(2, cx, cz)) * this.radiusScale;
-				float nx = dwx * 0.0015F;
-				float nz = dwz * 0.0015F;
+				float radius = NoiseUtil.lerp(this.minRadius, this.maxRadius, this.roll(2, gx, gz));
+				float falloffRadius = radius * FALLOFF_SCALE;
 
-				float nVal0 = this.shapeNoise.compute(nx, nz, this.seed + 99);
-				float nVal1 = this.shapeNoise.compute(nx * 2.5F, nz * 2.5F, this.seed + 100);
-				float nVal2 = this.shapeNoise.compute(nx * 6.0F, nz * 6.0F, this.seed + 101);
-				float nVal3 = this.shapeNoise.compute(dwx * 0.030F, dwz * 0.030F, this.seed + 102);
-				float nValRipple = this.shapeNoise.compute(dwx * 0.0833F, dwz * 0.0833F, this.seed + 103);
-				float nValMod = this.shapeNoise.compute(nx * 4.0F, nz * 4.0F, this.seed + 104);
+				float dist = NoiseUtil.sqrt(NoiseUtil.dist2(worldX, worldZ, sx, sz));
+				if (dist >= falloffRadius) {
+					// too far away for even the soft falloff band to reach
+					continue;
+				}
 
-				float nMin = this.shapeNoise.minValue();
-				float nMax = this.shapeNoise.maxValue();
-				float range = nMax - nMin;
+				float t = NoiseUtil.clamp(dist / radius, 0.0F, 1.0F);
+				float coreEdge = this.radialEdge(t);
 
-				float norm0 = range != 0 ? (nVal0 - nMin) / range : 0.5F;
-				float norm1 = range != 0 ? (nVal1 - nMin) / range : 0.5F;
-				float norm2 = range != 0 ? (nVal2 - nMin) / range : 0.5F;
-				float norm3 = range != 0 ? (nVal3 - nMin) / range : 0.5F;
-				float normRipple = range != 0 ? (nValRipple - nMin) / range : 0.5F;
-				float normMod = range != 0 ? (nValMod - nMin) / range : 0.5F;
+				float edge;
+				if (dist <= radius) {
+					edge = coreEdge;
+				} else {
+					// soft blend from the island's own boundary value down to the
+					// flat open-ocean plateau, so there is no hard step and no
+					// dependency on the mainland's own edge value at this pixel
+					float falloffT = (dist - radius) / (falloffRadius - radius);
+					edge = NoiseUtil.lerp(coreEdge, OPEN_OCEAN_EDGE, falloffT);
+				}
 
-				float steepness = NoiseUtil.clamp((norm0 * 0.60F + norm1 * 0.40F), 0.0F, 1.0F);
-				float coastalWeight = 0.05F + (steepness * 0.17F);
-				float combinedNoise = (norm0 * 0.55F) + (norm1 * 0.35F) + ((norm2 - 0.5F) * coastalWeight);
-
-				float totalRadius = baseRadius * 6.5F * (0.5F + (NoiseUtil.clamp(combinedNoise, 0.0F, 1.0F) * 1.5F));
-				float dist = NoiseUtil.sqrt(NoiseUtil.dist2(worldX, worldZ, dwx, dwz));
-				if (dist >= totalRadius) continue;
-
-// angle-based lobing: gives each island 2-4 bays/peninsulas instead of a circle
-				float angle = (float) Math.atan2(worldX - dwx, worldZ - dwz);
-				float lobePhase = this.roll(5, cx, cz) * 6.2831855F;
-				int lobeCount = 2 + (int) (this.roll(6, cx, cz) * 3.0F);
-				float lobe = 0.72F + 0.28F * NoiseUtil.cos(angle * lobeCount + lobePhase);
-
-// fine noise along the outline for cliff/beach roughness
-				float outlineNoise = this.shapeNoise.compute(
-						dwx * 0.06F + NoiseUtil.cos(angle) * 8.0F,
-						dwz * 0.06F + NoiseUtil.sin(angle) * 8.0F,
-						this.seed + 106
-				);
-				float outlineNorm = range != 0 ? (outlineNoise - nMin) / range : 0.5F;
-				float outlineDistort = 1.0F + (outlineNorm - 0.5F) * 0.28F;
-
-				float lobedRadius = totalRadius * lobe * outlineDistort;
-				// fixed-width falloff band (in blocks) instead of a ratio of the radius,
-				// so lobe/bay directions don't compress the coast into a hard cliff
-				float transitionWidth = Math.max(24.0F, this.minRadius * 0.5F);
-				float baseAlpha = NoiseUtil.clamp((lobedRadius - dist) / transitionWidth, 0.0F, 1.0F);
-				baseAlpha = baseAlpha * baseAlpha * (3.0F - 2.0F * baseAlpha);
-				float alpha = NoiseUtil.clamp(baseAlpha + ((norm3 - 0.5F) * 0.08F * baseAlpha) + ((normRipple - 0.5F) * (0.015F + (normMod * 0.09F)) * baseAlpha), 0.0F, 1.0F);
-				alpha *= bufferMul;
-
-				totalAlpha += alpha;
-				if (alpha > maxSingleAlpha) {
-					maxSingleAlpha = alpha;
-					bestSteepness = steepness;
-					bestGridX = cx;
-					bestGridZ = cz;
-					isMushroom = this.roll(3, cx, cz) < this.rareBiomeChance;
-					found = true;
+				if (!placed || edge > bestEdge) {
+					placed = true;
+					bestEdge = edge;
+					bestGridX = gx;
+					bestGridZ = gz;
 				}
 			}
 		}
 
-		return !found || totalAlpha <= 0.0F ? null : new IslandSample(Math.min(1.0F, totalAlpha), bestSteepness, isMushroom, bestGridX, bestGridZ);
-	}
-
-	private float roll(int offset, int gridX, int gridZ) {
-		return NoiseUtil.map(NoiseUtil.valCoord2D(this.seed + offset, gridX, gridZ), -1.0F, 1.0F, 2.0F);
+		if (!placed) {
+			return null;
+		}
+		boolean mushroom = this.roll(3, bestGridX, bestGridZ) < this.rareBiomeChance;
+		return new IslandSample(bestEdge, mushroom, bestGridX, bestGridZ);
 	}
 
 	/**
-	 * Fades island alpha to zero as the queried point's own continent edge
-	 * value approaches the mainland, independent of the island candidate's centre.
+	 * Converts a radial distance fraction (0 at the island's centre, 1 at its
+	 * core radius) into a continentEdge value spanning the full deepOcean ->
+	 * 1.0 range - the SAME range and control points the mainland's own
+	 * terrain populator reads. This is what gives islands a real
+	 * shallow-ocean ring and a beach band. inlandFraction shifts the balance
+	 * point of the curve, controlling how much of the radius reads as inland
+	 * core versus coastal fringe.
+	 *
+	 * EXPERIMENTAL: an extra flattening step is applied around a fixed point
+	 * in the curve approximating where the coast/beach band sits. This
+	 * compresses more of the physical radius into a narrow band of edge
+	 * values right at that point, which stretches the land-to-ocean-floor
+	 * slope out near the surface instead of dropping straight down, reading
+	 * as a small beach shelf. The exact position ({@code shelfCenter} /
+	 * {@code shelfWidth}) is a rough guess and will likely need retuning
+	 * once seen in-game.
 	 */
-	private float pointBufferMultiplier(float pointContinentEdge) {
-		if (this.continentBuffer <= 0.0F) {
-			return 1.0F;
+	private float radialEdge(float t) {
+		float shelfCenter = 0.78F;
+		float shelfWidth = 0.12F;
+		float dist = Math.abs(t - shelfCenter);
+		if (dist < shelfWidth) {
+			float local = dist / shelfWidth;
+			float ease = local * local * (3.0F - 2.0F * local);
+			t = shelfCenter + (t - shelfCenter) * ease;
 		}
-		float bufferStart = this.controlPoints.shallowOcean - this.continentBuffer;
-		if (pointContinentEdge <= bufferStart) {
-			return 1.0F;
-		}
-		float t = NoiseUtil.clamp((pointContinentEdge - bufferStart) / this.continentBuffer, 0.0F, 1.0F);
-		t = t * t * (3.0F - 2.0F * t);
-		return 1.0F - t;
+
+		float invT = 1.0F - t;
+		float mid = NoiseUtil.lerp(0.75F, 0.25F, this.inlandFraction);
+		float curved = NoiseUtil.curve(invT, mid, 1.8F);
+		return NoiseUtil.lerp(this.controlPoints.deepOcean, 1.0F, curved);
+	}
+
+	/**
+	 * A deterministic pseudo-random value in [0, 1] for one island grid cell.
+	 * Same pattern as {@code ContinentGenerator.cellIdentity}.
+	 */
+	private float roll(int offset, int gridX, int gridZ) {
+		float value = NoiseUtil.valCoord2D(this.seed + offset, gridX, gridZ);
+		return NoiseUtil.map(value, -1.0F, 1.0F, 2.0F);
 	}
 
 	private static final class IslandSample {
-		final float alpha, steepness;
+		final float edge;
 		final boolean mushroom;
-		final int gridX, gridZ;
-		IslandSample(float alpha, float steepness, boolean mushroom, int gridX, int gridZ) {
-			this.alpha = alpha; this.steepness = steepness; this.mushroom = mushroom; this.gridX = gridX; this.gridZ = gridZ;
+		final int gridX;
+		final int gridZ;
+		IslandSample(float edge, boolean mushroom, int gridX, int gridZ) {
+			this.edge = edge;
+			this.mushroom = mushroom;
+			this.gridX = gridX;
+			this.gridZ = gridZ;
 		}
 	}
 }
