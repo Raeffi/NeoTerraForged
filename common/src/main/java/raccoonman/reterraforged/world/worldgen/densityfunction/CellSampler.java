@@ -46,14 +46,21 @@ public record CellSampler(Supplier<WorldLookup> deferredLookup, Field field) imp
 	public static class Cache2d {
 		private long lastPos = Long.MAX_VALUE;
 		private Cell cell = new Cell();
-		
+
 		public Cell getAndUpdate(WorldLookup lookup, int blockX, int blockZ, boolean sampleClimate) {
 			blockX = QuartPos.toBlock(QuartPos.fromBlock(blockX));
 			blockZ = QuartPos.toBlock(QuartPos.fromBlock(blockZ));
-			
+
 			long packedPos = PosUtil.pack(blockX, blockZ);
 			if(this.lastPos != packedPos) {
-				lookup.applyCell(this.cell.reset(), blockX, blockZ, false, sampleClimate);
+				// load=true forces the accurate path (WorldLookup.computeAccurate),
+				// which generates the full backing Tile through TileCache and runs
+				// WorldFilters (including BeachDetect) before the Cell is read here.
+				// Without this, biome/climate sampling can race ahead of tile
+				// generation and read an unfiltered Cell straight from
+				// Heightmap.apply(), silently skipping BeachDetect's erosion/
+				// weirdness substitution for that cell.
+				lookup.applyCell(this.cell.reset(), blockX, blockZ, true, sampleClimate);
 				this.lastPos = packedPos;
 			}
 			return this.cell;

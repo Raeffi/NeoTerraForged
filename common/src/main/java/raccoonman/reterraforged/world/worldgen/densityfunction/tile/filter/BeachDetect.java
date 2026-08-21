@@ -3,6 +3,8 @@ package raccoonman.reterraforged.world.worldgen.densityfunction.tile.filter;
 import raccoonman.reterraforged.data.worldgen.preset.settings.WorldSettings.ControlPoints;
 import raccoonman.reterraforged.world.worldgen.GeneratorContext;
 import raccoonman.reterraforged.world.worldgen.biome.BeachParameterCache;
+import raccoonman.reterraforged.world.worldgen.biome.Erosion;
+import raccoonman.reterraforged.world.worldgen.biome.Weirdness;
 import raccoonman.reterraforged.world.worldgen.cell.Cell;
 import raccoonman.reterraforged.world.worldgen.cell.heightmap.Levels;
 import raccoonman.reterraforged.world.worldgen.cell.terrain.TerrainType;
@@ -11,16 +13,22 @@ import raccoonman.reterraforged.world.worldgen.util.PosUtil;
 
 public record BeachDetect(Levels levels, ControlPoints transition) implements Filter {
 
-    public static final float SAFE_EROSION = 0.5F;
-    public static final float SAFE_WEIRDNESS = 0.15F;
-    private static final float STEEPNESS_THRESHOLD = 20e-7F;
+    public static final float SAFE_BEACH_EROSION = Erosion.LEVEL_3.mid();
+    public static final float SAFE_BEACH_WEIRDNESS = Weirdness.VALLEY.mid();
+    public static final float SAFE_STONY_EROSION = Erosion.LEVEL_0.mid();
+    public static final float SAFE_STONY_WEIRDNESS = Weirdness.VALLEY.mid();
+
+    // Increased threshold slightly and widened kernel distance to filter micro-noise
+    private static final float STEEPNESS_THRESHOLD = 30e-7F;
 
     private boolean isSteep(Filterable map, Cell cell, int x, int z) {
         float sum = 0;
         int count = 0;
 
-        for (int dz = -4; dz <= 4; dz += 2) {
-            for (int dx = -4; dx <= 4; dx += 2) {
+        // Sample with wider stride (4 blocks) across a larger radius (8 blocks)
+        // to compute macro-slope rather than micro-terrain jitter
+        for (int dz = -8; dz <= 8; dz += 4) {
+            for (int dx = -8; dx <= 8; dx += 4) {
                 Cell sample = map.getCellRaw(x + dx, z + dz);
                 if (sample.isAbsent()) continue;
 
@@ -32,7 +40,7 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
 
         if (count == 0) return false;
 
-        return sum / count >= STEEPNESS_THRESHOLD;
+        return (sum / count) >= STEEPNESS_THRESHOLD;
     }
 
     private float computeD2(Filterable map, Cell cell, int x, int z) {
@@ -60,6 +68,11 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
             distance -= 8;
         }
 
+        // Prevent division by zero near tile edges
+        if (distance <= 0) {
+            return 0.0F;
+        }
+
         return (a.height - b.height) / distance;
     }
 
@@ -77,8 +90,6 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
                     continue;
                 }
 
-                // purely continentEdge-driven — matches whatever band CellSampler
-                // uses for COAST continentalness, no neighbor lookups at all
                 boolean inCoastBand = cell.continentEdge >= this.transition.shallowOcean
                         && cell.continentEdge <= this.transition.beach;
 
@@ -90,7 +101,7 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
 
                 if (underwater) {
                     if (!(cell.terrain.isDeepOcean() || cell.terrain.isShallowOcean())) {
-                        continue; // don't touch river/lake cells that dip below sea level
+                        continue;
                     }
                     int depthBlocks = this.levels.scale(this.levels.water) - this.levels.scale(cell.height);
                     if (depthBlocks <= 6) {
@@ -107,7 +118,7 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
 
                 boolean steep = this.isSteep(map, cell, x, z);
 
-                long cellSeed = PosUtil.pack(x, z); // or however you derive a stable per-position long elsewhere in this codebase
+                long cellSeed = PosUtil.pack(x, z);
                 float[] safe = BeachParameterCache.findClosestErosionWeirdness(
                         cell.temperature, cell.moisture, cell.continentEdge, cell.erosion, steep, cellSeed
                 );
@@ -115,9 +126,12 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
                 if (safe != null) {
                     cell.erosion = safe[0];
                     cell.weirdness = safe[1];
+                } else if (steep) {
+                    cell.erosion = SAFE_STONY_EROSION;
+                    cell.weirdness = SAFE_STONY_WEIRDNESS;
                 } else {
-                    cell.erosion = SAFE_EROSION;
-                    cell.weirdness = SAFE_WEIRDNESS;
+                    cell.erosion = SAFE_BEACH_EROSION;
+                    cell.weirdness = SAFE_BEACH_WEIRDNESS;
                 }
             }
         }
