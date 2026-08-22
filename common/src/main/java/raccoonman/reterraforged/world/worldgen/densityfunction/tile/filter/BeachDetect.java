@@ -18,62 +18,33 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
     public static final float SAFE_STONY_EROSION = Erosion.LEVEL_0.mid();
     public static final float SAFE_STONY_WEIRDNESS = Weirdness.VALLEY.mid();
 
-    // Increased threshold slightly and widened kernel distance to filter micro-noise
-    private static final float STEEPNESS_THRESHOLD = 30e-7F;
+    // Adjusted for the physically accurate 8.0 block distance divisor
+    private static final float STEEPNESS_THRESHOLD = 80e-7F;
 
-    private boolean isSteep(Filterable map, Cell cell, int x, int z) {
-        float sum = 0;
-        int count = 0;
-
-        // Sample with wider stride (4 blocks) across a larger radius (8 blocks)
-        // to compute macro-slope rather than micro-terrain jitter
-        for (int dz = -8; dz <= 8; dz += 4) {
-            for (int dx = -8; dx <= 8; dx += 4) {
-                Cell sample = map.getCellRaw(x + dx, z + dz);
-                if (sample.isAbsent()) continue;
-
-                float d2 = this.computeD2(map, sample, x + dx, z + dz);
-                sum += d2;
-                count++;
-            }
-        }
-
-        if (count == 0) return false;
-
-        return (sum / count) >= STEEPNESS_THRESHOLD;
-    }
-
-    private float computeD2(Filterable map, Cell cell, int x, int z) {
+    private float computeD2(Filterable map, Cell center, int x, int z) {
         Cell n = map.getCellRaw(x, z - 4);
         Cell s = map.getCellRaw(x, z + 4);
         Cell e = map.getCellRaw(x + 4, z);
         Cell w = map.getCellRaw(x - 4, z);
 
-        float gx = this.grad(e, w, cell);
-        float gz = this.grad(n, s, cell);
+        float gx = this.gradSafe(e, w, center);
+        float gz = this.gradSafe(s, n, center);
 
         return gx * gx + gz * gz;
     }
 
-    private float grad(Cell a, Cell b, Cell def) {
-        int distance = 16;
+    private float gradSafe(Cell pos, Cell neg, Cell center) {
+        boolean posValid = !pos.isAbsent();
+        boolean negValid = !neg.isAbsent();
 
-        if (a.isAbsent()) {
-            a = def;
-            distance -= 8;
+        if (posValid && negValid) {
+            return (pos.height - neg.height) / 8.0F; // 8 block span
+        } else if (posValid) {
+            return (pos.height - center.height) / 4.0F; // 4 block span
+        } else if (negValid) {
+            return (center.height - neg.height) / 4.0F; // 4 block span
         }
-
-        if (b.isAbsent()) {
-            b = def;
-            distance -= 8;
-        }
-
-        // Prevent division by zero near tile edges
-        if (distance <= 0) {
-            return 0.0F;
-        }
-
-        return (a.height - b.height) / distance;
+        return 0.0F;
     }
 
     @Override
@@ -81,8 +52,46 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
         Size size = map.getBlockSize();
         int total = size.total();
 
-        for (int x = 0; x < total; x++) {
-            for (int z = 0; z < total; z++) {
+        float[] d2Buffer = new float[total * total];
+        float[] blurX = new float[total * total];
+
+        // Safely initialize with -1.0F to prevent 0.0F border drag
+        for (int i = 0; i < d2Buffer.length; i++) {
+            d2Buffer[i] = -1.0F;
+            blurX[i] = -1.0F;
+        }
+
+        // --- PASS 1 ---
+        for (int z = 0; z < total; z++) {
+            for (int x = 0; x < total; x++) {
+                Cell center = map.getCellRaw(x, z);
+                if (center.isAbsent()) continue;
+                d2Buffer[x + z * total] = this.computeD2(map, center, x, z);
+            }
+        }
+
+        // --- PASS 2 ---
+        for (int z = 0; z < total; z++) {
+            for (int x = 0; x < total; x++) {
+                float sum = 0;
+                int count = 0;
+                for (int dx = -4; dx <= 4; dx++) {
+                    int nx = x + dx;
+                    if (nx >= 0 && nx < total) {
+                        float val = d2Buffer[nx + z * total];
+                        if (val >= 0.0F) { // Ignore absent blocks!
+                            sum += val;
+                            count++;
+                        }
+                    }
+                }
+                blurX[x + z * total] = count > 0 ? sum / count : -1.0F;
+            }
+        }
+
+        // --- PASS 3 ---
+        for (int z = 0; z < total; z++) {
+            for (int x = 0; x < total; x++) {
                 Cell cell = map.getCellRaw(x, z);
 
                 if (cell.terrain.overridesCoast() || cell.terrain.isWetland()
@@ -97,8 +106,23 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
                     continue;
                 }
 
-                boolean underwater = cell.height <= this.levels.water;
+                float sum = 0;
+                int count = 0;
+                for (int dz = -4; dz <= 4; dz++) {
+                    int nz = z + dz;
+                    if (nz >= 0 && nz < total) {
+                        float val = blurX[x + nz * total];
+                        if (val >= 0.0F) { // Ignore absent blocks!
+                            sum += val;
+                            count++;
+                        }
+                    }
+                }
 
+                float finalD2 = count > 0 ? sum / count : 0.0F;
+                boolean steep = finalD2 >= STEEPNESS_THRESHOLD;
+
+                boolean underwater = cell.height <= this.levels.water;
                 if (underwater) {
                     if (!(cell.terrain.isDeepOcean() || cell.terrain.isShallowOcean())) {
                         continue;
@@ -116,11 +140,9 @@ public record BeachDetect(Levels levels, ControlPoints transition) implements Fi
                     cell.terrain = TerrainType.BEACH;
                 }
 
-                boolean steep = this.isSteep(map, cell, x, z);
-
-                long cellSeed = PosUtil.pack(x, z);
+                // Since we removed RNG, the seed parameter is arbitrary now
                 float[] safe = BeachParameterCache.findClosestErosionWeirdness(
-                        cell.temperature, cell.moisture, cell.continentEdge, cell.erosion, steep, cellSeed
+                        cell.temperature, cell.moisture, cell.continentEdge, cell.erosion, steep, 0L
                 );
 
                 if (safe != null) {

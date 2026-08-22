@@ -112,15 +112,21 @@ public class IslandContinent implements Continent {
 		// produces organic shapes instead.
 		float avgRadius = (this.minRadius + this.maxRadius) * 0.5F;
 		int extraLargeScale = Math.max(10, Math.round(avgRadius * 1.8F));
-		int largeScale = Math.max(8, Math.round(avgRadius * 0.9F));
-		int mediumScale = Math.max(6, Math.round(avgRadius * 0.4F));
-		int smallScale = Math.max(4, Math.round(avgRadius * 0.15F));
-		int extraSmallScale = Math.max(2, Math.round(avgRadius * 0.06F));
-		Domain shapeWarp = Domains.domainPerlin(seed.next(), extraLargeScale, 2, avgRadius * 0.7F);
-		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), largeScale, 2, avgRadius * 0.45F));
-		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), mediumScale, 2, avgRadius * 0.25F));
-		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), smallScale, 1, avgRadius * 0.12F));
-		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), extraSmallScale, 1, avgRadius * 0.04F));
+		// INCREASED SCALES: Make the underlying noise features larger so the distortions look like
+		// peninsulas/bays rather than just jagged static.
+		int extraLargeScale = Math.max(10, Math.round(avgRadius * 2.5F));
+		int largeScale = Math.max(8, Math.round(avgRadius * 1.2F));
+		int mediumScale = Math.max(6, Math.round(avgRadius * 0.5F));
+		int smallScale = Math.max(4, Math.round(avgRadius * 0.2F));
+		int extraSmallScale = Math.max(2, Math.round(avgRadius * 0.08F));
+
+		// INCREASED AMPLITUDES (4th parameter): This is what actually moves the pixels.
+		// Boosting 0.7F to 1.6F means the largest warp pass can drag a piece of land almost twice as far!
+		Domain shapeWarp = Domains.domainPerlin(seed.next(), extraLargeScale, 3, avgRadius * 3.6F);
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), largeScale, 2, avgRadius * 1.6F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), mediumScale, 2, avgRadius * 0.4F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), smallScale, 1, avgRadius * 0.25F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), extraSmallScale, 1, avgRadius * 0.1F));
 		this.shapeWarp = shapeWarp;
 	}
 
@@ -290,13 +296,24 @@ public class IslandContinent implements Continent {
 	 * once seen in-game.
 	 */
 	private float radialEdge(float t) {
-		float shelfCenter = 0.78F;
-		float shelfWidth = 0.12F;
-		float dist = Math.abs(t - shelfCenter);
-		if (dist < shelfWidth) {
+		// --- FLAT BEACH & SHALLOW SHELF TUNING ---
+		float shelfCenter = 0.65F;
+		float shelfWidth = 0.4F;
+
+		float dist = t - shelfCenter;
+		if (Math.abs(dist) < shelfWidth) {
 			float local = dist / shelfWidth;
-			float ease = local * local * (3.0F - 2.0F * local);
-			t = shelfCenter + (t - shelfCenter) * ease;
+			float plateau = local * (2.0F - Math.abs(local));
+			t = shelfCenter + plateau * (shelfWidth * 0.5F);
+		}
+
+		// --- OUTER SLOPE SMOOTHING ---
+		// If t is on the ocean-facing side beyond the shelf, gently ease it
+		// so it doesn't plunge into the steep curve abruptly.
+		if (t > shelfCenter + (shelfWidth * 0.5F)) {
+			float oceanProgress = (t - (shelfCenter + (shelfWidth * 0.5F))) / (1.0F - (shelfCenter + (shelfWidth * 0.5F)));
+			// Smooth out the fallrate towards the open ocean
+			t = (shelfCenter + (shelfWidth * 0.5F)) + (oceanProgress * oceanProgress) * (1.0F - (shelfCenter + (shelfWidth * 0.5F)));
 		}
 
 		float invT = 1.0F - t;

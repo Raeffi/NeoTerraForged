@@ -53,14 +53,11 @@ public record CellSampler(Supplier<WorldLookup> deferredLookup, Field field) imp
 
 			long packedPos = PosUtil.pack(blockX, blockZ);
 			if(this.lastPos != packedPos) {
-				// load=true forces the accurate path (WorldLookup.computeAccurate),
-				// which generates the full backing Tile through TileCache and runs
-				// WorldFilters (including BeachDetect) before the Cell is read here.
-				// Without this, biome/climate sampling can race ahead of tile
-				// generation and read an unfiltered Cell straight from
-				// Heightmap.apply(), silently skipping BeachDetect's erosion/
-				// weirdness substitution for that cell.
-				lookup.applyCell(this.cell.reset(), blockX, blockZ, true, sampleClimate);
+				// REVERTED: forcing load=true here caused an instant crash on world
+				// load, most likely from spawn search (SpawnFinderFix) hammering this
+				// method hundreds of times and each call blocking synchronously on a
+				// full Tile generation. Needs a stack trace before retrying a fix here.
+				lookup.applyCell(this.cell.reset(), blockX, blockZ, false, sampleClimate);
 				this.lastPos = packedPos;
 			}
 			return this.cell;

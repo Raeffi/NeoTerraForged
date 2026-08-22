@@ -1,8 +1,6 @@
 package raccoonman.reterraforged.world.worldgen.biome;
 
-import java.util.ArrayList;
 import java.util.List;
-
 import net.minecraft.world.level.biome.Climate;
 
 public class BeachParameterCache {
@@ -18,8 +16,7 @@ public class BeachParameterCache {
 
     public static float[] findClosestErosionWeirdness(float temperature, float humidity, float continentalness, float erosion, boolean steep, long randomSeed) {
         if (steep && !stonyShorePoints.isEmpty()) {
-            Climate.ParameterPoint point = stonyShorePoints.get(0);
-            return toErosionWeirdness(point);
+            return toErosionWeirdness(stonyShorePoints.get(0));
         }
 
         if (beachPoints.isEmpty()) {
@@ -27,31 +24,20 @@ public class BeachParameterCache {
         }
 
         long bestDist = Long.MAX_VALUE;
+        Climate.ParameterPoint bestPoint = beachPoints.get(0);
+
+        // Deterministically find the absolute best match (No RNG)
         for (Climate.ParameterPoint point : beachPoints) {
             long dist = point.fitness(Climate.target(
                     temperature, humidity, continentalness, erosion, 0, 0
             ));
             if (dist < bestDist) {
                 bestDist = dist;
+                bestPoint = point;
             }
         }
 
-        // gather every point within a tolerance band of the best match
-        List<Climate.ParameterPoint> candidates = new ArrayList<>();
-        long tolerance = bestDist + (bestDist / 4) + 1000; // ~25% tolerance, tune as needed
-        for (Climate.ParameterPoint point : beachPoints) {
-            long dist = point.fitness(Climate.target(
-                    temperature, humidity, continentalness, erosion, 0, 0
-            ));
-            if (dist <= tolerance) {
-                candidates.add(point);
-            }
-        }
-
-        Climate.ParameterPoint chosen = candidates.get(
-                new java.util.Random(randomSeed).nextInt(candidates.size())
-        );
-        return toErosionWeirdness(chosen);
+        return toErosionWeirdness(bestPoint);
     }
 
     private static float[] toErosionWeirdness(Climate.ParameterPoint point) {
