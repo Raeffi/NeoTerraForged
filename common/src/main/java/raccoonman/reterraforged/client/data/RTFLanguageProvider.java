@@ -167,6 +167,7 @@ public final class RTFLanguageProvider {
 			this.add(RTFTranslationKeys.GUI_SLIDER_MOUNTAIN_BIOME_USAGE, "Mountain Biome Usage");
 			this.add(RTFTranslationKeys.GUI_SLIDER_VOLCANO_BIOME_USAGE, "Volcano Biome Usage");
 			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_CONTINENT_BUFFER, "Island Continent Buffer");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_RARE_BIOME_CHANCE, "Island Rare Biome Chance");
 
 			//TODO move the trailing colon and space to PresetEditorPage
 			this.add(RTFTranslationKeys.GUI_LABEL_PREVIEW_AREA, "Area: ");
@@ -329,6 +330,7 @@ public final class RTFLanguageProvider {
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_VOLCANO_BIOME_USAGE), "The probability that volcano terrain will be set to a volcano biome type.\nThis may help improve compatibility with mods that rely exclusively on volcano biomes.");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_STRATA_REGION_SIZE), "Controls the size of strata regions");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_CONTINENT_BUFFER), "Controls the minimum gap kept between islands and the mainland coastline. Larger values push islands further out to sea, preventing them from generating close enough to blend with a continent.");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_RARE_BIOME_CHANCE), "Controls the chance that an island is eligible to host a rare biome, such as Mushroom Fields.");
 		}
 	}
 }

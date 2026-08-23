@@ -152,6 +152,8 @@
   "reterraforged.gui.slider.volcanoBiomeUsage": "Volcano Biome Usage",
 
   "reterraforged.gui.slider.island_chance": "Island Chance: %.2f",
+  "reterraforged.gui.slider.islandContinentBuffer": "Island Continent Buffer",
+  "reterraforged.gui.slider.islandRareBiomeChance": "Island Rare Biome Chance",
 
   "reterraforged.gui.label.previewArea": "Area: ",
   "reterraforged.gui.label.previewTerrain": "Terrain: ",
@@ -308,6 +310,9 @@
 
   "reterraforged.gui.slider.mountainBiomeUsage.tooltip": "The probability that mountainous terrain will be set to a mountain biome type.\nThis may help improve compatibility with mods that rely exclusively on mountain biomes.",
   "reterraforged.gui.slider.volcanoBiomeUsage.tooltip": "The probability that volcano terrain will be set to a volcano biome type.\nThis may help improve compatibility with mods that rely exclusively on volcano biomes.",
-  "reterraforged.gui.slider.strataRegionSize.tooltip": "Controls the size of strata regions"
+  "reterraforged.gui.slider.strataRegionSize.tooltip": "Controls the size of strata regions",
+
+  "reterraforged.gui.slider.islandContinentBuffer.tooltip": "Controls the minimum gap kept between islands and the mainland coastline. Larger values push islands further out to sea, preventing them from generating close enough to blend with a continent.",
+  "reterraforged.gui.slider.islandRareBiomeChance.tooltip": "Controls the chance that an island is eligible to host a rare biome, such as Mushroom Fields."
 }
 

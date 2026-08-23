@@ -307,7 +307,7 @@ public class IslandContinent implements Continent {
 		float shelfWidth = 0.5F;          // Width of the shelf
 
 		// 1. ELEVATION SHIFT (-0.03F raises beach, +0.03F lowers beach)
-		float shelfElevationShift = -0.032F;//-0.27F;
+		float shelfElevationShift = -0.025F;//-0.27F;
 
 		// 2. FLATNESS CONTROL
 		// 1.0 = completely flat plateau

@@ -33,8 +33,8 @@ public class TerrainType {
     public static final Terrain LAGOON = register("lagoon", TerrainCategory.ISLAND);
     public static final Terrain DEEP_LAGOON = register("deep_lagoon", TerrainCategory.ISLAND);
     public static final Terrain ARCHIPELAGO = register("archipelago", TerrainCategory.ISLAND);
-    public static final Terrain MUSHROOM_ARCHIPELAGO = register("mushroom_archipelago", TerrainCategory.ISLAND);
-    public static final Terrain MUSHROOM_FIELDS = register("mushroom_fields", TerrainCategory.ISLAND);
+    public static final Terrain MUSHROOM_ARCHIPELAGO = registerCoastOverride("mushroom_archipelago", TerrainCategory.ISLAND);
+    public static final Terrain MUSHROOM_FIELDS = registerCoastOverride("mushroom_fields", TerrainCategory.ISLAND);
 
     public static void forEach(Consumer<Terrain> action) {
         TerrainType.REGISTRY.forEach(action);
@@ -133,7 +133,7 @@ public class TerrainType {
             return terrain;
         }
     }
-    
+
     private static Terrain registerVolcano(String name, TerrainCategory type) {
         synchronized (TerrainType.LOCK) {
             Terrain terrain = new ConfiguredTerrain(TerrainType.REGISTRY.size(), name, type, true, true) {
@@ -141,7 +141,23 @@ public class TerrainType {
                 public boolean isVolcano() {
                     return true;
                 }
-                
+
+                @Override
+                public boolean overridesCoast() {
+                    return true;
+                }
+            };
+            TerrainType.REGISTRY.add(terrain);
+            return terrain;
+        }
+    }
+
+    // Mushroom terrain must keep its type through the climate step.
+    // The coast check in ClimateModule.modifyTerrain would erase it
+    // before biome selection can read it.
+    private static Terrain registerCoastOverride(String name, TerrainCategory type) {
+        synchronized (TerrainType.LOCK) {
+            Terrain terrain = new Terrain(TerrainType.REGISTRY.size(), name, type) {
                 @Override
                 public boolean overridesCoast() {
                     return true;
