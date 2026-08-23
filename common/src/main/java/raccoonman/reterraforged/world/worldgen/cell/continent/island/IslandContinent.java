@@ -57,6 +57,8 @@ public class IslandContinent implements Continent {
 	private static final float FALLOFF_SCALE = 1.35F;
 	// flat edge value islands blend toward past their falloff band - a plateau, not the mainland's own value
 	private static final float OPEN_OCEAN_EDGE = 0.0F;
+	private static final float MIN_OCEAN_THRESHOLD = 0.15F;
+	private static final float MIN_BUFFER_THRESHOLD = 0.15F;
 
 	private final Continent delegate;
 	private final boolean enabled;
@@ -74,6 +76,7 @@ public class IslandContinent implements Continent {
 	private final Domain warp;
 	private final Domain shapeWarp;
 
+
 	public IslandContinent(Continent delegate, Seed seed, GeneratorContext context) {
 		this.delegate = delegate;
 		WorldSettings.Islands settings = context.preset.world().islands;
@@ -84,7 +87,7 @@ public class IslandContinent implements Continent {
 		this.chance = NoiseUtil.clamp(settings.chance, 0.0F, 1.0F);
 		this.rareBiomeChance = NoiseUtil.clamp(settings.rareBiomeChance, 0.0F, 1.0F);
 		this.continentBuffer = Math.max(0.0F, settings.continentBuffer);
-		this.oceanThreshold = this.controlPoints.deepOcean;
+		this.oceanThreshold = Math.max(this.controlPoints.deepOcean, MIN_OCEAN_THRESHOLD);
 		this.seed = seed.next();
 
 		// islandCoast (0-1) sets overall island size. At 0, islands cap out at the
@@ -111,7 +114,6 @@ public class IslandContinent implements Continent {
 		// octave only ever wobbles a circle; the range of scales is what
 		// produces organic shapes instead.
 		float avgRadius = (this.minRadius + this.maxRadius) * 0.5F;
-		int extraLargeScale = Math.max(10, Math.round(avgRadius * 1.8F));
 		// INCREASED SCALES: Make the underlying noise features larger so the distortions look like
 		// peninsulas/bays rather than just jagged static.
 		int extraLargeScale = Math.max(10, Math.round(avgRadius * 2.5F));
@@ -234,7 +236,8 @@ public class IslandContinent implements Continent {
 				// this is the only place the mainland's shape can prevent an
 				// island from existing at all
 				float continentEdgeAtCenter = this.delegate.getEdgeValue(worldX, worldZ);
-				if (continentEdgeAtCenter >= this.controlPoints.shallowOcean - this.continentBuffer) {
+				float bufferThreshold = Math.max(this.controlPoints.shallowOcean - this.continentBuffer, MIN_BUFFER_THRESHOLD);
+				if (continentEdgeAtCenter >= bufferThreshold) {
 					continue;
 				}
 
@@ -296,30 +299,127 @@ public class IslandContinent implements Continent {
 	 * once seen in-game.
 	 */
 	private float radialEdge(float t) {
-		// --- FLAT BEACH & SHALLOW SHELF TUNING ---
-		float shelfCenter = 0.65F;
-		float shelfWidth = 0.4F;
+		// ==========================================
+		// MASTER CONTROLS
+		// ==========================================
+		float islandRadius = 0.75F;       // Leaves 40% of the space for the ocean slope
+		float shelfCenter = 0.8F;        // Horizontal position of the shelf
+		float shelfWidth = 0.5F;          // Width of the shelf
 
-		float dist = t - shelfCenter;
-		if (Math.abs(dist) < shelfWidth) {
-			float local = dist / shelfWidth;
-			float plateau = local * (2.0F - Math.abs(local));
-			t = shelfCenter + plateau * (shelfWidth * 0.5F);
+		// 1. ELEVATION SHIFT (-0.03F raises beach, +0.03F lowers beach)
+		float shelfElevationShift = -0.032F;//-0.27F;
+
+		// 2. FLATNESS CONTROL
+		// 1.0 = completely flat plateau
+		// 0.8 = gentle slope across the beach (highly recommended for natural blending)
+		float flattenStrength = 0.95F;
+
+		// 3. OUTER SLOPE STEEPNESS
+		float slopeSteepness = 0.4F;
+		// ==========================================
+
+
+		// 4. SHELF BLEND ALPHA (NEW)
+		// 1.0 = Normal blend.
+		// < 1.0 (e.g., 0.5) = Gradual, rolling transition, narrower flat spot.
+		// > 1.0 (e.g., 2.0) = Wider flat spot, sharper transition at the edges.
+		float inlandBlendAlpha = 0.3F;  // Blending from the beach into the mountains
+		float oceanBlendAlpha = 0.6F;   // Blending from the beach into the ocean drop-off
+		// ==========================================
+
+
+		// ==========================================
+		// PART 1: INLAND & BEACH SHELF (INTEGRATION MATH)
+		// ==========================================
+		float mappedT = t;
+
+		if (t <= islandRadius) {
+			mappedT = t / islandRadius;
+			float dist = mappedT - shelfCenter;
+
+			if (dist > -shelfWidth && dist < shelfWidth) {
+				float x = dist / shelfWidth;
+
+				// Calculate the physical area carved out to flatten the slope
+				float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
+				float integral;
+
+				if (x < 0) {
+					float p = inlandBlendAlpha;
+					float Ix = x + (float)Math.pow(Math.abs(x), p + 1.0F) / (p + 1.0F);
+					float I_minus_one = -1.0F + 1.0F / (p + 1.0F);
+					integral = Ix - I_minus_one;
+				} else {
+					float p = oceanBlendAlpha;
+					float Ix = x - (float)Math.pow(x, p + 1.0F) / (p + 1.0F);
+					integral = area_inland + Ix;
+				}
+
+				// Subtract the carved area to perfectly roll the terrain flat
+				mappedT = mappedT - (flattenStrength * shelfWidth * integral);
+
+				// Add the tiny elevation shift smoothly to avoid breaking the slope
+				float absX = Math.abs(x);
+				float shiftWeight = 1.0F - (absX * absX * (3.0F - 2.0F * absX));
+				mappedT += shelfElevationShift * shiftWeight;
+
+			} else if (dist >= shelfWidth) {
+				// Permanently subtract the total carved area so the outer boundary perfectly connects
+				float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
+				float area_ocean = 1.0F - (1.0F / (oceanBlendAlpha + 1.0F));
+				mappedT = mappedT - (flattenStrength * shelfWidth * (area_inland + area_ocean));
+			}
+
+			float invT = 1.0F - mappedT;
+			float mid = NoiseUtil.lerp(0.75F, 0.25F, this.inlandFraction);
+			float curved = NoiseUtil.curve(invT, mid, 1.8F);
+			return NoiseUtil.lerp(this.controlPoints.deepOcean, 1.0F, curved);
 		}
 
-		// --- OUTER SLOPE SMOOTHING ---
-		// If t is on the ocean-facing side beyond the shelf, gently ease it
-		// so it doesn't plunge into the steep curve abruptly.
-		if (t > shelfCenter + (shelfWidth * 0.5F)) {
-			float oceanProgress = (t - (shelfCenter + (shelfWidth * 0.5F))) / (1.0F - (shelfCenter + (shelfWidth * 0.5F)));
-			// Smooth out the fallrate towards the open ocean
-			t = (shelfCenter + (shelfWidth * 0.5F)) + (oceanProgress * oceanProgress) * (1.0F - (shelfCenter + (shelfWidth * 0.5F)));
+		// ==========================================
+		// PART 2: S-CURVE OCEAN DROP-OFF
+		// ==========================================
+
+		// Calculate EXACT boundary height using the same integral math
+		float boundaryT = 1.0F;
+		float boundaryDist = boundaryT - shelfCenter;
+
+		if (boundaryDist >= shelfWidth) {
+			float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
+			float area_ocean = 1.0F - (1.0F / (oceanBlendAlpha + 1.0F));
+			boundaryT = boundaryT - (flattenStrength * shelfWidth * (area_inland + area_ocean));
+		} else if (boundaryDist > -shelfWidth) {
+			float x = boundaryDist / shelfWidth;
+			float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
+			float integral;
+			if (x < 0) {
+				float p = inlandBlendAlpha;
+				float Ix = x + (float)Math.pow(Math.abs(x), p + 1.0F) / (p + 1.0F);
+				float I_minus_one = -1.0F + 1.0F / (p + 1.0F);
+				integral = Ix - I_minus_one;
+			} else {
+				float p = oceanBlendAlpha;
+				float Ix = x - (float)Math.pow(x, p + 1.0F) / (p + 1.0F);
+				integral = area_inland + Ix;
+			}
+			boundaryT = boundaryT - (flattenStrength * shelfWidth * integral);
+
+			float absX = Math.abs(x);
+			float shiftWeight = 1.0F - (absX * absX * (3.0F - 2.0F * absX));
+			boundaryT += shelfElevationShift * shiftWeight;
 		}
 
-		float invT = 1.0F - t;
-		float mid = NoiseUtil.lerp(0.75F, 0.25F, this.inlandFraction);
-		float curved = NoiseUtil.curve(invT, mid, 1.8F);
-		return NoiseUtil.lerp(this.controlPoints.deepOcean, 1.0F, curved);
+		float invTEdge = 1.0F - boundaryT;
+		float midEdge = NoiseUtil.lerp(0.75F, 0.25F, this.inlandFraction);
+		float curvedEdge = NoiseUtil.curve(invTEdge, midEdge, 1.8F);
+		float shelfEdgeHeight = NoiseUtil.lerp(this.controlPoints.deepOcean, 1.0F, curvedEdge);
+
+		// Smoothly drop to the ocean floor
+		float oceanProgress = (t - islandRadius) / (1.0F - islandRadius);
+		float adjustedProgress = Math.min(1.0F, oceanProgress * slopeSteepness);
+		float smoothDropoff = adjustedProgress * adjustedProgress * (3.0F - 2.0F * adjustedProgress);
+
+		return NoiseUtil.lerp(shelfEdgeHeight, this.controlPoints.deepOcean, smoothDropoff);
 	}
 
 	/**
