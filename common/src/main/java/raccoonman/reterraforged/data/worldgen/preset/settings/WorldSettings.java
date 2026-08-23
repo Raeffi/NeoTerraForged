@@ -173,7 +173,7 @@ public class WorldSettings {
 		public int spacing = 600;
 		public float chance = 0.2F;
 		public float minRadius = 32.0F;
-		public float maxRadius = 128.0F;
+		public float maxRadius = 256.0F;
 		public float jitter = 0.7F;
 		public float rareBiomeChance = 0.05F;
 		public float continentBuffer = 0.05F;

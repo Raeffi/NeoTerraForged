@@ -46,13 +46,17 @@ public record CellSampler(Supplier<WorldLookup> deferredLookup, Field field) imp
 	public static class Cache2d {
 		private long lastPos = Long.MAX_VALUE;
 		private Cell cell = new Cell();
-		
+
 		public Cell getAndUpdate(WorldLookup lookup, int blockX, int blockZ, boolean sampleClimate) {
 			blockX = QuartPos.toBlock(QuartPos.fromBlock(blockX));
 			blockZ = QuartPos.toBlock(QuartPos.fromBlock(blockZ));
-			
+
 			long packedPos = PosUtil.pack(blockX, blockZ);
 			if(this.lastPos != packedPos) {
+				// REVERTED: forcing load=true here caused an instant crash on world
+				// load, most likely from spawn search (SpawnFinderFix) hammering this
+				// method hundreds of times and each call blocking synchronously on a
+				// full Tile generation. Needs a stack trace before retrying a fix here.
 				lookup.applyCell(this.cell.reset(), blockX, blockZ, false, sampleClimate);
 				this.lastPos = packedPos;
 			}
