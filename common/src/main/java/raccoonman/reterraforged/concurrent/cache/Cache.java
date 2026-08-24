@@ -41,10 +41,16 @@ public class Cache<V extends ExpiringEntry> implements AutoCloseable {
     public V computeIfAbsent(long key, LongFunction<V> func) {
         return this.map.computeIfAbsent(key, func);
     }
-    
+
     public void poll() {
         this.timeout = System.currentTimeMillis() - this.lifetimeMS;
-        this.map.removeIf((entry) -> entry.getTimestamp() < this.timeout);
+        this.map.removeIf((entry) -> {
+            boolean expired = entry.getTimestamp() < this.timeout;
+            if (expired) {
+                entry.close();
+            }
+            return expired;
+        });
     }
 
 	@Override

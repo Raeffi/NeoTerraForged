@@ -27,6 +27,8 @@ public class ArrayPool<T> {
 				if (resource.get().length >= arraySize) {
 					return resource.retain();
 				}
+				// wrong size for this one call; keep it for later use
+				this.pool.add(resource);
 			}
 		}
 		return new Item<>(this.constructor.apply(arraySize), this);

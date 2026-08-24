@@ -7,6 +7,7 @@ import java.util.function.Predicate;
 import java.util.function.Consumer;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import java.util.concurrent.locks.StampedLock;
+import raccoonman.reterraforged.concurrent.cache.ExpiringEntry;
 
 public class StampedBoundLongMap<T> implements LongMap<T> {
 	private int capacity;
@@ -115,7 +116,10 @@ public class StampedBoundLongMap<T> implements LongMap<T> {
 		long writeStamp = this.lock.writeLock();
 		try {
 			if (this.map.size() >= this.capacity) {
-				this.map.removeFirst();
+				T evicted = this.map.removeFirst();
+				if (evicted instanceof ExpiringEntry expiring) {
+					expiring.close();
+				}
 			}
 			return this.map.computeIfAbsent(key, func);
 		} finally {
