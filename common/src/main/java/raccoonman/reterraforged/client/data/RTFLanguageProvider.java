@@ -330,7 +330,41 @@ public final class RTFLanguageProvider {
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_VOLCANO_BIOME_USAGE), "The probability that volcano terrain will be set to a volcano biome type.\nThis may help improve compatibility with mods that rely exclusively on volcano biomes.");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_STRATA_REGION_SIZE), "Controls the size of strata regions");
 			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_CONTINENT_BUFFER), "Controls the minimum gap kept between islands and the mainland coastline. Larger values push islands further out to sea, preventing them from generating close enough to blend with a continent.");
-			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_RARE_BIOME_CHANCE), "Controls the chance that an island is eligible to host a rare biome, such as Mushroom Fields.");
+
+			this.add(RTFTranslationKeys.GUI_ISLAND_SETTINGS_TITLE, "Island Settings");
+			this.add(RTFTranslationKeys.GUI_LABEL_ISLANDS, "Islands");
+			this.add(RTFTranslationKeys.GUI_LABEL_ISLAND_SHAPE, "Island Shape");
+			this.add(RTFTranslationKeys.GUI_BUTTON_ISLANDS_ENABLED, "Enabled");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_SPACING, "Spacing");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_CHANCE, "Chance");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_MIN_RADIUS, "Min Radius");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_MAX_RADIUS, "Max Radius");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_JITTER, "Jitter");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_RARE_BIOME_CHANCE, "Rare Biome Chance");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_CORE_RADIUS, "Core Radius");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_SHELF_CENTER, "Shelf Center");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_SHELF_WIDTH, "Shelf Width");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_SHELF_ELEVATION_SHIFT, "Shelf Elevation Shift");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_FLATTEN_STRENGTH, "Flatten Strength");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_SLOPE_STEEPNESS, "Slope Steepness");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_INLAND_BLEND_ALPHA, "Inland Blend Alpha");
+			this.add(RTFTranslationKeys.GUI_SLIDER_ISLAND_OCEAN_BLEND_ALPHA, "Ocean Blend Alpha");
+
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_BUTTON_ISLANDS_ENABLED), "Turns island generation on or off");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_SPACING), "Controls the average distance between island grid points");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_CHANCE), "Controls the chance that a grid point holds an island");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_MIN_RADIUS), "Controls the smallest possible island radius");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_MAX_RADIUS), "Controls the largest possible island radius");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_JITTER), "Controls how far an island can drift from its grid point");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_RARE_BIOME_CHANCE), "Controls the chance an island can host a rare biome such as Mushroom Fields");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_CORE_RADIUS), "Controls how much of the island radius forms the inland and beach shelf before the ocean slope begins");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_SHELF_CENTER), "Controls the horizontal position of the beach shelf");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_SHELF_WIDTH), "Controls the width of the beach shelf");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_SHELF_ELEVATION_SHIFT), "Raises or lowers the beach shelf");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_FLATTEN_STRENGTH), "Controls how flat the beach shelf is");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_SLOPE_STEEPNESS), "Controls the steepness of the outer ocean drop-off");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_INLAND_BLEND_ALPHA), "Controls the blend curve on the inland side of the beach shelf");
+			this.add(Tooltips.translationKey(RTFTranslationKeys.GUI_SLIDER_ISLAND_OCEAN_BLEND_ALPHA), "Controls the blend curve on the ocean side of the beach shelf");
 		}
 	}
 }

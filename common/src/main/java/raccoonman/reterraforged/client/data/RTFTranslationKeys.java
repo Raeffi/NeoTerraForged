@@ -70,7 +70,6 @@ public final class RTFTranslationKeys {
 	public static final String GUI_SLIDER_CONTINENT_NOISE_OCTAVES = resolve("gui.slider.continentNoiseOctaves");
 	public static final String GUI_SLIDER_CONTINENT_NOISE_GAIN = resolve("gui.slider.continentNoiseGain");
 	public static final String GUI_SLIDER_CONTINENT_NOISE_LACUNARITY = resolve("gui.slider.continentNoiseLacunarity");
-	public static final String GUI_SLIDER_ISLAND_CHANCE = resolve("gui.slider.island_chance");
 	public static final String GUI_SLIDER_ISLAND_INLAND = resolve("gui.slider.islandInland");
 	public static final String GUI_SLIDER_ISLAND_COAST = resolve("gui.slider.islandCoast");
 	public static final String GUI_SLIDER_DEEP_OCEAN = resolve("gui.slider.deepOcean");
@@ -156,7 +155,23 @@ public final class RTFTranslationKeys {
 	public static final String GUI_SLIDER_MOUNTAIN_BIOME_USAGE = resolve("gui.slider.mountainBiomeUsage");
 	public static final String GUI_SLIDER_VOLCANO_BIOME_USAGE = resolve("gui.slider.volcanoBiomeUsage");
 	public static final String GUI_SLIDER_ISLAND_CONTINENT_BUFFER = resolve("gui.slider.islandContinentBuffer");
+
+	public static final String GUI_ISLAND_SETTINGS_TITLE = resolve("gui.islandSettings.title");
+	public static final String GUI_BUTTON_ISLANDS_ENABLED = resolve("gui.button.islandsEnabled");
+	public static final String GUI_SLIDER_ISLAND_SPACING = resolve("gui.slider.islandSpacing");
+	public static final String GUI_SLIDER_ISLAND_CHANCE = resolve("gui.slider.islandChance");
+	public static final String GUI_SLIDER_ISLAND_MIN_RADIUS = resolve("gui.slider.islandMinRadius");
+	public static final String GUI_SLIDER_ISLAND_MAX_RADIUS = resolve("gui.slider.islandMaxRadius");
+	public static final String GUI_SLIDER_ISLAND_JITTER = resolve("gui.slider.islandJitter");
 	public static final String GUI_SLIDER_ISLAND_RARE_BIOME_CHANCE = resolve("gui.slider.islandRareBiomeChance");
+	public static final String GUI_SLIDER_ISLAND_CORE_RADIUS = resolve("gui.slider.islandCoreRadius");
+	public static final String GUI_SLIDER_ISLAND_SHELF_CENTER = resolve("gui.slider.islandShelfCenter");
+	public static final String GUI_SLIDER_ISLAND_SHELF_WIDTH = resolve("gui.slider.islandShelfWidth");
+	public static final String GUI_SLIDER_ISLAND_SHELF_ELEVATION_SHIFT = resolve("gui.slider.islandShelfElevationShift");
+	public static final String GUI_SLIDER_ISLAND_FLATTEN_STRENGTH = resolve("gui.slider.islandFlattenStrength");
+	public static final String GUI_SLIDER_ISLAND_SLOPE_STEEPNESS = resolve("gui.slider.islandSlopeSteepness");
+	public static final String GUI_SLIDER_ISLAND_INLAND_BLEND_ALPHA = resolve("gui.slider.islandInlandBlendAlpha");
+	public static final String GUI_SLIDER_ISLAND_OCEAN_BLEND_ALPHA = resolve("gui.slider.islandOceanBlendAlpha");
 
 	public static final String GUI_LABEL_PREVIEW_AREA = resolve("gui.label.previewArea");
 	public static final String GUI_LABEL_PREVIEW_TERRAIN = resolve("gui.label.previewTerrain");
@@ -188,6 +203,8 @@ public final class RTFTranslationKeys {
 	public static final String GUI_LABEL_WETLANDS = resolve("gui.label.wetlands");
 	public static final String GUI_LABEL_EROSION = resolve("gui.label.erosion");
 	public static final String GUI_LABEL_SMOOTHING = resolve("gui.label.smoothing");
+	public static final String GUI_LABEL_ISLANDS = resolve("gui.label.islands");
+	public static final String GUI_LABEL_ISLAND_SHAPE = resolve("gui.label.islandShape");
 
 	private static String resolve(String key) {
 		return RTFCommon.MOD_ID + "." + key;

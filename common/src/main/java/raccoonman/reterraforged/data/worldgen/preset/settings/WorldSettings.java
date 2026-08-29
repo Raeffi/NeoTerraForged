@@ -150,35 +150,36 @@ public class WorldSettings {
 
 	public static class Islands {
 		public static final Codec<Islands> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-				Codec.BOOL.optionalFieldOf("enabled").forGetter((o) -> Optional.of(o.enabled)),
-				Codec.INT.optionalFieldOf("spacing").forGetter((o) -> Optional.of(o.spacing)),
-				Codec.FLOAT.optionalFieldOf("chance").forGetter((o) -> Optional.of(o.chance)),
-				Codec.FLOAT.optionalFieldOf("minRadius").forGetter((o) -> Optional.of(o.minRadius)),
-				Codec.FLOAT.optionalFieldOf("maxRadius").forGetter((o) -> Optional.of(o.maxRadius)),
-				Codec.FLOAT.optionalFieldOf("jitter").forGetter((o) -> Optional.of(o.jitter)),
-				Codec.FLOAT.optionalFieldOf("rareBiomeChance").forGetter((o) -> Optional.of(o.rareBiomeChance)),
-				Codec.FLOAT.optionalFieldOf("continentBuffer").forGetter((o) -> Optional.of(o.continentBuffer))
-		).apply(instance, (enabled, spacing, chance, minRadius, maxRadius, jitter, rareBiomeChance, continentBuffer) -> new Islands(
-				enabled.orElse(true),
-				spacing.orElse(600),
-				chance.orElse(0.2F),
-				minRadius.orElse(32.0F),
-				maxRadius.orElse(128.0F),
-				jitter.orElse(0.7F),
-				rareBiomeChance.orElse(0.05F),
-				continentBuffer.orElse(0.05F)
-		)));
-
-		public boolean enabled = true;
-		public int spacing = 600;
-		public float chance = 0.2F;
-		public float minRadius = 32.0F;
-		public float maxRadius = 256.0F;
-		public float jitter = 0.7F;
-		public float rareBiomeChance = 0.05F;
-		public float continentBuffer = 0.05F;
-
-		public Islands(boolean enabled, int spacing, float chance, float minRadius, float maxRadius, float jitter, float rareBiomeChance, float continentBuffer) {
+				Codec.BOOL.optionalFieldOf("enabled", true).forGetter((o) -> o.enabled),
+				Codec.INT.optionalFieldOf("spacing", 600).forGetter((o) -> o.spacing),
+				Codec.FLOAT.optionalFieldOf("chance", 0.2F).forGetter((o) -> o.chance),
+				Codec.FLOAT.optionalFieldOf("minRadius", 32.0F).forGetter((o) -> o.minRadius),
+				Codec.FLOAT.optionalFieldOf("maxRadius", 128.0F).forGetter((o) -> o.maxRadius),
+				Codec.FLOAT.optionalFieldOf("jitter", 0.7F).forGetter((o) -> o.jitter),
+				Codec.FLOAT.optionalFieldOf("rareBiomeChance", 0.05F).forGetter((o) -> o.rareBiomeChance),
+				Codec.FLOAT.optionalFieldOf("continentBuffer", 0.05F).forGetter((o) -> o.continentBuffer),
+				Shape.CODEC.optionalFieldOf("shape", Shape.makeDefault()).forGetter((o) -> o.shape)
+		).apply(instance, Islands::new));
+		// true to scatter islands across the ocean at all
+		public boolean enabled;
+		// average distance, in blocks, between island grid points
+		public int spacing;
+		// chance, 0-1, that any one grid point actually holds an island
+		public float chance;
+		// smallest possible island radius, in blocks
+		public float minRadius;
+		// largest possible island radius, in blocks
+		public float maxRadius;
+		// how far an island's centre can drift from its grid point, 0-1
+		public float jitter;
+		// chance, 0-1, that an island is eligible to host an isolated biome such as Mushroom Fields
+		public float rareBiomeChance;
+		// minimum gap, in continentEdge units, kept between an island's centre and the
+		// mainland coastline before the island is allowed to generate at all
+		public float continentBuffer;
+		// the shape of an island's inland/beach shelf and ocean drop-off
+		public Shape shape;
+		public Islands(boolean enabled, int spacing, float chance, float minRadius, float maxRadius, float jitter, float rareBiomeChance, float continentBuffer, Shape shape) {
 			this.enabled = enabled;
 			this.spacing = spacing;
 			this.chance = chance;
@@ -187,14 +188,58 @@ public class WorldSettings {
 			this.jitter = jitter;
 			this.rareBiomeChance = rareBiomeChance;
 			this.continentBuffer = continentBuffer;
+			this.shape = shape;
 		}
-
 		public static Islands makeDefault() {
-			return new Islands(true, 600, 0.2F, 32.0F, 128.0F, 0.7F, 0.05F, 0.05F);
+			return new Islands(true, 600, 0.2F, 32.0F, 128.0F, 0.7F, 0.05F, 0.05F, Shape.makeDefault());
+		}
+		public Islands copy() {
+			return new Islands(this.enabled, this.spacing, this.chance, this.minRadius, this.maxRadius, this.jitter, this.rareBiomeChance, this.continentBuffer, this.shape.copy());
 		}
 
-		public Islands copy() {
-			return new Islands(this.enabled, this.spacing, this.chance, this.minRadius, this.maxRadius, this.jitter, this.rareBiomeChance, this.continentBuffer);
+		public static class Shape {
+			public static final Codec<Shape> CODEC = RecordCodecBuilder.create(instance -> instance.group(
+					Codec.FLOAT.optionalFieldOf("coreRadius", 0.75F).forGetter((o) -> o.coreRadius),
+					Codec.FLOAT.optionalFieldOf("shelfCenter", 0.8F).forGetter((o) -> o.shelfCenter),
+					Codec.FLOAT.optionalFieldOf("shelfWidth", 0.5F).forGetter((o) -> o.shelfWidth),
+					Codec.FLOAT.optionalFieldOf("shelfElevationShift", -0.025F).forGetter((o) -> o.shelfElevationShift),
+					Codec.FLOAT.optionalFieldOf("flattenStrength", 0.95F).forGetter((o) -> o.flattenStrength),
+					Codec.FLOAT.optionalFieldOf("slopeSteepness", 0.4F).forGetter((o) -> o.slopeSteepness),
+					Codec.FLOAT.optionalFieldOf("inlandBlendAlpha", 0.3F).forGetter((o) -> o.inlandBlendAlpha),
+					Codec.FLOAT.optionalFieldOf("oceanBlendAlpha", 0.6F).forGetter((o) -> o.oceanBlendAlpha)
+			).apply(instance, Shape::new));
+			// fraction of the island radius that forms the inland/beach shelf, before the outer ocean slope begins
+			public float coreRadius;
+			// horizontal position of the beach shelf within the island's core radius
+			public float shelfCenter;
+			// width of the beach shelf
+			public float shelfWidth;
+			// raises or lowers the beach shelf; negative values raise it
+			public float shelfElevationShift;
+			// how flat the beach shelf is; 1.0 gives a flat plateau
+			public float flattenStrength;
+			// steepness of the outer ocean drop-off past the island's core radius
+			public float slopeSteepness;
+			// blend curve exponent on the inland side of the beach shelf
+			public float inlandBlendAlpha;
+			// blend curve exponent on the ocean side of the beach shelf
+			public float oceanBlendAlpha;
+			public Shape(float coreRadius, float shelfCenter, float shelfWidth, float shelfElevationShift, float flattenStrength, float slopeSteepness, float inlandBlendAlpha, float oceanBlendAlpha) {
+				this.coreRadius = coreRadius;
+				this.shelfCenter = shelfCenter;
+				this.shelfWidth = shelfWidth;
+				this.shelfElevationShift = shelfElevationShift;
+				this.flattenStrength = flattenStrength;
+				this.slopeSteepness = slopeSteepness;
+				this.inlandBlendAlpha = inlandBlendAlpha;
+				this.oceanBlendAlpha = oceanBlendAlpha;
+			}
+			public static Shape makeDefault() {
+				return new Shape(0.75F, 0.8F, 0.5F, -0.025F, 0.95F, 0.4F, 0.3F, 0.6F);
+			}
+			public Shape copy() {
+				return new Shape(this.coreRadius, this.shelfCenter, this.shelfWidth, this.shelfElevationShift, this.flattenStrength, this.slopeSteepness, this.inlandBlendAlpha, this.oceanBlendAlpha);
+			}
 		}
 	}
 }

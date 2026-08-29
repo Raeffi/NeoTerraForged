@@ -35,8 +35,12 @@ import raccoonman.reterraforged.world.worldgen.util.Seed;
 import raccoonman.reterraforged.world.worldgen.cell.continent.island.IslandContinent;
 
 public record Heightmap(CellPopulator terrain, CellPopulator region, Continent continent, Climate climate, Levels levels, ControlPoints controlPoints, float terrainFrequency, Noise beachNoise) {
-	
-	public void apply(Cell cell, float x, float z, boolean applyClimate) {
+    // mushroom terrain reads as low, mossy ground - it should never cover
+    // a mountain peak, so cap the elevation it's allowed to override.
+    // elevation is 0 at water level, rising toward 1 at max world height
+    private static final float MUSHROOM_MAX_ELEVATION = 0.55F;
+
+    public void apply(Cell cell, float x, float z, boolean applyClimate) {
 		this.applyTerrain(cell, x, z);
 		this.applyRivers(cell, x, z, this.continent.getRivermap(cell));
 		this.applyClimate(cell, x, z, applyClimate);
@@ -51,9 +55,11 @@ public record Heightmap(CellPopulator terrain, CellPopulator region, Continent c
         // shapes for island cells, so it must always run - it is the only code path
         // that writes cell.height
         this.terrain.apply(cell, x * this.terrainFrequency, z * this.terrainFrequency);
-        if (cell.mushroomIsland) {
+        if (cell.mushroomIsland && this.levels.elevation(cell.height) < MUSHROOM_MAX_ELEVATION) {
             // overrides whatever the ordinary terrain populator picked, so CellSampler's
-            // existing "cell.terrain == TerrainType.MUSHROOM_FIELDS" check can find it
+            // existing "cell.terrain == TerrainType.MUSHROOM_FIELDS" check can find it.
+            // skipped above MUSHROOM_MAX_ELEVATION so mountain peaks stay as
+            // normal rock/mountain terrain instead of being painted mushroom
             cell.terrain = TerrainType.MUSHROOM_FIELDS;
         }
     }

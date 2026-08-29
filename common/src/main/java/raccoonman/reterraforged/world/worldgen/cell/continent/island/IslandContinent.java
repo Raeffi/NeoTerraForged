@@ -75,7 +75,25 @@ public class IslandContinent implements Continent {
 	private final WorldSettings.ControlPoints controlPoints;
 	private final Domain warp;
 	private final Domain shapeWarp;
-
+	private final float coreRadius;
+	private final float shelfCenter;
+	private final float shelfWidth;
+	private final float shelfElevationShift;
+	private final float flattenStrength;
+	private final float slopeSteepness;
+	private final float inlandBlendAlpha;
+	private final float oceanBlendAlpha;
+	// how far out from the island centre mushroom terrain is allowed,
+	// as a fraction of the core radius (0 = centre only, 1 = whole core).
+	// scales with inlandFraction, same as islandInland already controls
+	// how much of the island's radius reads as inland in radialEdge()
+	private final float mushroomCoreFraction;
+	// fraction of the ISLAND'S FULL RADIUS (not just the core) mushroom
+	// terrain is allowed to reach. 1.0 would touch the very edge where
+	// the shore/shallow water forms, so max is kept just under that to
+	// leave a thin strip of real beach
+	private static final float MUSHROOM_FRACTION_MIN = 1.0F;
+	private static final float MUSHROOM_FRACTION_MAX = 1.0F;
 
 	public IslandContinent(Continent delegate, Seed seed, GeneratorContext context) {
 		this.delegate = delegate;
@@ -90,6 +108,16 @@ public class IslandContinent implements Continent {
 		this.oceanThreshold = Math.max(this.controlPoints.deepOcean, MIN_OCEAN_THRESHOLD);
 		this.seed = seed.next();
 
+		WorldSettings.Islands.Shape shape = settings.shape;
+		this.coreRadius = shape.coreRadius;
+		this.shelfCenter = shape.shelfCenter;
+		this.shelfWidth = shape.shelfWidth;
+		this.shelfElevationShift = shape.shelfElevationShift;
+		this.flattenStrength = shape.flattenStrength;
+		this.slopeSteepness = shape.slopeSteepness;
+		this.inlandBlendAlpha = shape.inlandBlendAlpha;
+		this.oceanBlendAlpha = shape.oceanBlendAlpha;
+
 		// islandCoast (0-1) sets overall island size. At 0, islands cap out at the
 		// preset's configured maxRadius; at 1 they can grow until they'd start
 		// touching a neighbouring grid cell's island (half the grid spacing)
@@ -101,6 +129,9 @@ public class IslandContinent implements Continent {
 
 		// islandInland sets how much of that radius reads as inland core versus coastal fringe
 		this.inlandFraction = NoiseUtil.clamp(this.controlPoints.islandInland, 0.0F, 1.0F);
+		// scale the mushroom-eligible zone the same way: more configured
+		// inland space means more of the core radius is safe to cover
+		this.mushroomCoreFraction = NoiseUtil.lerp(MUSHROOM_FRACTION_MIN, MUSHROOM_FRACTION_MAX, this.inlandFraction);
 
 		// macro warp: distorts the sample point before the grid search, so
 		// islands scatter at irregular offsets from their grid points
@@ -124,11 +155,11 @@ public class IslandContinent implements Continent {
 
 		// INCREASED AMPLITUDES (4th parameter): This is what actually moves the pixels.
 		// Boosting 0.7F to 1.6F means the largest warp pass can drag a piece of land almost twice as far!
-		Domain shapeWarp = Domains.domainPerlin(seed.next(), extraLargeScale, 3, avgRadius * 3.6F);
-		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), largeScale, 2, avgRadius * 1.6F));
-		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), mediumScale, 2, avgRadius * 0.4F));
+		Domain shapeWarp = Domains.domainPerlin(seed.next(), extraLargeScale, 4, avgRadius * 4.4F);
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), largeScale, 2, avgRadius * 1.55F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), mediumScale, 3, avgRadius * 1.0F));
 		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), smallScale, 1, avgRadius * 0.25F));
-		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), extraSmallScale, 1, avgRadius * 0.1F));
+		shapeWarp = Domains.add(shapeWarp, Domains.domainPerlin(seed.next(), extraSmallScale, 2, avgRadius * 0.2F));
 		this.shapeWarp = shapeWarp;
 	}
 
@@ -149,7 +180,7 @@ public class IslandContinent implements Continent {
 		// miss the cell and let mainland rivers cut into the island
 		cell.continentX = ISLAND_MARKER + Math.abs(sample.gridX);
 		cell.continentZ = ISLAND_MARKER + Math.abs(sample.gridZ);
-		if (sample.mushroom) {
+		if (sample.mushroom && this.isWellInland(sample.coreT)) {
 			cell.mushroomIsland = true;
 		}
 	}
@@ -213,6 +244,7 @@ public class IslandContinent implements Continent {
 		float bestEdge = OPEN_OCEAN_EDGE;
 		int bestGridX = 0;
 		int bestGridZ = 0;
+		float bestT = 1.0F;
 		boolean placed = false;
 
 		for (int dz = -1; dz <= 1; ++dz) {
@@ -269,6 +301,7 @@ public class IslandContinent implements Continent {
 					bestEdge = edge;
 					bestGridX = gx;
 					bestGridZ = gz;
+					bestT = t;
 				}
 			}
 		}
@@ -277,7 +310,7 @@ public class IslandContinent implements Continent {
 			return null;
 		}
 		boolean mushroom = this.roll(3, bestGridX, bestGridZ) < this.rareBiomeChance;
-		return new IslandSample(bestEdge, mushroom, bestGridX, bestGridZ);
+		return new IslandSample(bestEdge, mushroom, bestGridX, bestGridZ, bestT);
 	}
 
 	/**
@@ -300,74 +333,45 @@ public class IslandContinent implements Continent {
 	 */
 	private float radialEdge(float t) {
 		// ==========================================
-		// MASTER CONTROLS
-		// ==========================================
-		float islandRadius = 0.75F;       // Leaves 40% of the space for the ocean slope
-		float shelfCenter = 0.8F;        // Horizontal position of the shelf
-		float shelfWidth = 0.5F;          // Width of the shelf
-
-		// 1. ELEVATION SHIFT (-0.03F raises beach, +0.03F lowers beach)
-		float shelfElevationShift = -0.025F;//-0.27F;
-
-		// 2. FLATNESS CONTROL
-		// 1.0 = completely flat plateau
-		// 0.8 = gentle slope across the beach (highly recommended for natural blending)
-		float flattenStrength = 0.95F;
-
-		// 3. OUTER SLOPE STEEPNESS
-		float slopeSteepness = 0.4F;
-		// ==========================================
-
-
-		// 4. SHELF BLEND ALPHA (NEW)
-		// 1.0 = Normal blend.
-		// < 1.0 (e.g., 0.5) = Gradual, rolling transition, narrower flat spot.
-		// > 1.0 (e.g., 2.0) = Wider flat spot, sharper transition at the edges.
-		float inlandBlendAlpha = 0.3F;  // Blending from the beach into the mountains
-		float oceanBlendAlpha = 0.6F;   // Blending from the beach into the ocean drop-off
-		// ==========================================
-
-
-		// ==========================================
 		// PART 1: INLAND & BEACH SHELF (INTEGRATION MATH)
 		// ==========================================
 		float mappedT = t;
 
-		if (t <= islandRadius) {
-			mappedT = t / islandRadius;
-			float dist = mappedT - shelfCenter;
+		if (t <= this.coreRadius) {
+			mappedT = t / this.coreRadius;
+			float dist = mappedT - this.shelfCenter;
 
-			if (dist > -shelfWidth && dist < shelfWidth) {
-				float x = dist / shelfWidth;
+			if (dist > -this.shelfWidth && dist < this.shelfWidth) {
+				float x = dist / this.shelfWidth;
 
 				// Calculate the physical area carved out to flatten the slope
-				float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
+				float area_inland = 1.0F - (1.0F / (this.inlandBlendAlpha + 1.0F));
 				float integral;
 
 				if (x < 0) {
-					float p = inlandBlendAlpha;
+					float p = this.inlandBlendAlpha;
 					float Ix = x + (float)Math.pow(Math.abs(x), p + 1.0F) / (p + 1.0F);
 					float I_minus_one = -1.0F + 1.0F / (p + 1.0F);
 					integral = Ix - I_minus_one;
 				} else {
-					float p = oceanBlendAlpha;
+					float p = this.oceanBlendAlpha;
 					float Ix = x - (float)Math.pow(x, p + 1.0F) / (p + 1.0F);
 					integral = area_inland + Ix;
 				}
 
 				// Subtract the carved area to perfectly roll the terrain flat
-				mappedT = mappedT - (flattenStrength * shelfWidth * integral);
+				mappedT = mappedT - (this.flattenStrength * this.shelfWidth * integral);
 
 				// Add the tiny elevation shift smoothly to avoid breaking the slope
 				float absX = Math.abs(x);
 				float shiftWeight = 1.0F - (absX * absX * (3.0F - 2.0F * absX));
-				mappedT += shelfElevationShift * shiftWeight;
+				mappedT += this.shelfElevationShift * shiftWeight;
 
-			} else if (dist >= shelfWidth) {
+			} else if (dist >= this.shelfWidth) {
 				// Permanently subtract the total carved area so the outer boundary perfectly connects
-				float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
-				float area_ocean = 1.0F - (1.0F / (oceanBlendAlpha + 1.0F));
-				mappedT = mappedT - (flattenStrength * shelfWidth * (area_inland + area_ocean));
+				float area_inland = 1.0F - (1.0F / (this.inlandBlendAlpha + 1.0F));
+				float area_ocean = 1.0F - (1.0F / (this.oceanBlendAlpha + 1.0F));
+				mappedT = mappedT - (this.flattenStrength * this.shelfWidth * (area_inland + area_ocean));
 			}
 
 			float invT = 1.0F - mappedT;
@@ -382,31 +386,31 @@ public class IslandContinent implements Continent {
 
 		// Calculate EXACT boundary height using the same integral math
 		float boundaryT = 1.0F;
-		float boundaryDist = boundaryT - shelfCenter;
+		float boundaryDist = boundaryT - this.shelfCenter;
 
-		if (boundaryDist >= shelfWidth) {
-			float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
-			float area_ocean = 1.0F - (1.0F / (oceanBlendAlpha + 1.0F));
-			boundaryT = boundaryT - (flattenStrength * shelfWidth * (area_inland + area_ocean));
-		} else if (boundaryDist > -shelfWidth) {
-			float x = boundaryDist / shelfWidth;
-			float area_inland = 1.0F - (1.0F / (inlandBlendAlpha + 1.0F));
+		if (boundaryDist >= this.shelfWidth) {
+			float area_inland = 1.0F - (1.0F / (this.inlandBlendAlpha + 1.0F));
+			float area_ocean = 1.0F - (1.0F / (this.oceanBlendAlpha + 1.0F));
+			boundaryT = boundaryT - (this.flattenStrength * this.shelfWidth * (area_inland + area_ocean));
+		} else if (boundaryDist > -this.shelfWidth) {
+			float x = boundaryDist / this.shelfWidth;
+			float area_inland = 1.0F - (1.0F / (this.inlandBlendAlpha + 1.0F));
 			float integral;
 			if (x < 0) {
-				float p = inlandBlendAlpha;
+				float p = this.inlandBlendAlpha;
 				float Ix = x + (float)Math.pow(Math.abs(x), p + 1.0F) / (p + 1.0F);
 				float I_minus_one = -1.0F + 1.0F / (p + 1.0F);
 				integral = Ix - I_minus_one;
 			} else {
-				float p = oceanBlendAlpha;
+				float p = this.oceanBlendAlpha;
 				float Ix = x - (float)Math.pow(x, p + 1.0F) / (p + 1.0F);
 				integral = area_inland + Ix;
 			}
-			boundaryT = boundaryT - (flattenStrength * shelfWidth * integral);
+			boundaryT = boundaryT - (this.flattenStrength * this.shelfWidth * integral);
 
 			float absX = Math.abs(x);
 			float shiftWeight = 1.0F - (absX * absX * (3.0F - 2.0F * absX));
-			boundaryT += shelfElevationShift * shiftWeight;
+			boundaryT += this.shelfElevationShift * shiftWeight;
 		}
 
 		float invTEdge = 1.0F - boundaryT;
@@ -415,11 +419,23 @@ public class IslandContinent implements Continent {
 		float shelfEdgeHeight = NoiseUtil.lerp(this.controlPoints.deepOcean, 1.0F, curvedEdge);
 
 		// Smoothly drop to the ocean floor
-		float oceanProgress = (t - islandRadius) / (1.0F - islandRadius);
-		float adjustedProgress = Math.min(1.0F, oceanProgress * slopeSteepness);
+		float oceanProgress = (t - this.coreRadius) / (1.0F - this.coreRadius);
+		float adjustedProgress = Math.min(1.0F, oceanProgress * this.slopeSteepness);
 		float smoothDropoff = adjustedProgress * adjustedProgress * (3.0F - 2.0F * adjustedProgress);
 
 		return NoiseUtil.lerp(shelfEdgeHeight, this.controlPoints.deepOcean, smoothDropoff);
+	}
+
+	/**
+	 * True if a radius fraction (0 = island centre, 1 = the island's
+	 * full radius, right at the shore) is close enough in to safely
+	 * carry mushroom terrain. Compares directly against the island's
+	 * full radius rather than stopping at coreRadius, so raising
+	 * mushroomCoreFraction toward its max lets mushroom terrain bleed
+	 * into part of the beach-shelf band and reach closer to the coast.
+	 */
+	private boolean isWellInland(float coreT) {
+		return coreT < this.mushroomCoreFraction;
 	}
 
 	/**
@@ -436,11 +452,16 @@ public class IslandContinent implements Continent {
 		final boolean mushroom;
 		final int gridX;
 		final int gridZ;
-		IslandSample(float edge, boolean mushroom, int gridX, int gridZ) {
+		// distance fraction (0 = island centre, 1 = core radius edge)
+		// of the grid point that produced this sample - lets callers
+		// tell whether a cell sits well inland of the beach shelf
+		final float coreT;
+		IslandSample(float edge, boolean mushroom, int gridX, int gridZ, float coreT) {
 			this.edge = edge;
 			this.mushroom = mushroom;
 			this.gridX = gridX;
 			this.gridZ = gridZ;
+			this.coreT = coreT;
 		}
 	}
 }

@@ -31,13 +31,11 @@ public class WorldSettingsPage extends PresetEditorPage {
 	private Slider islandChance;
 	private Slider islandInland;
 	private Slider islandCoast;
-	private Slider islandRareBiomeChance;
 	private Slider deepOcean;
 	private Slider shallowOcean;
 	private Slider beach;
 	private Slider coast;
 	private Slider inland;
-	private Slider islandContinentBuffer;
 	
 	private CycleButton<SpawnType> spawnType;
 	private Slider worldHeight;
@@ -141,16 +139,6 @@ public class WorldSettingsPage extends PresetEditorPage {
 			this.regenerate();
 			return value;
 		});
-		this.islandContinentBuffer = PresetWidgets.createFloatSlider(world.islands.continentBuffer, 0.0F, 0.5F, RTFTranslationKeys.GUI_SLIDER_ISLAND_CONTINENT_BUFFER, (slider, value) -> {
-			world.islands.continentBuffer = (float) slider.scaleValue(value);
-			this.regenerate();
-			return value;
-		});
-		this.islandRareBiomeChance = PresetWidgets.createFloatSlider(world.islands.rareBiomeChance, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_ISLAND_RARE_BIOME_CHANCE, (slider, value) -> {
-			world.islands.rareBiomeChance = (float) slider.scaleValue(value);
-			this.regenerate();
-			return value;
-		});
 		this.deepOcean = PresetWidgets.createFloatSlider(controlPoints.deepOcean, 0.0F, 1.0F, RTFTranslationKeys.GUI_SLIDER_DEEP_OCEAN, (slider, value) -> {
 			// clamped against the settings object (not the shallowOcean Slider widget
 			// directly) to keep deepOcean <= shallowOcean, which every downstream
@@ -225,8 +213,6 @@ public class WorldSettingsPage extends PresetEditorPage {
 		this.left.addWidget(this.islandChance);
 		this.left.addWidget(this.islandInland);
 		this.left.addWidget(this.islandCoast);
-		this.left.addWidget(this.islandContinentBuffer);
-		this.left.addWidget(this.islandRareBiomeChance);
 		this.left.addWidget(this.deepOcean);
 		this.left.addWidget(this.shallowOcean);
 		this.left.addWidget(this.beach);
@@ -244,12 +230,12 @@ public class WorldSettingsPage extends PresetEditorPage {
 
 	@Override
 	public Optional<Page> previous() {
-		return Optional.of(new PresetListPage(this.screen));
+		return Optional.of(new IslandSettingsPage(this.screen, this.preset));
 	}
 
 	@Override
 	public Optional<Page> next() {
-		return Optional.of(new SurfaceSettingsPage(this.screen, this.preset));
+		return Optional.of(new IslandSettingsPage(this.screen, this.preset));
 	}
 
 	private void applyContinentType(ContinentType type) {
